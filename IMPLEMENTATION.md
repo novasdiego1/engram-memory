@@ -125,6 +125,7 @@ CREATE TABLE agents (
    - Recency decay: `exp(-λ * days_since_commit)`, `λ = 0.05`
 4. Return top-`limit` facts (default 10), ordered by score
 5. Include `agent_id`, `confidence`, `committed_at` in each result — agents need provenance
+6. **CRITICAL:** Join with `conflicts` table to flag `has_open_conflict: true` if the fact is currently disputed. (Mitigates the "Blind Read" failure mode where agents unknowingly act on contested information).
 
 The relevance + recency hybrid is drawn from MIRIX's Active Retrieval insight: pure semantic similarity misses temporally important recent facts, but pure recency ignores relevance. The hybrid balances both.
 
@@ -161,7 +162,9 @@ Triggered after every `engram_commit` (async, non-blocking to the committing age
 **Step 1 — Candidate retrieval**
 
 For the newly committed fact `f_new`:
-- Retrieve the top-20 most embedding-similar facts in the same scope
+- Retrieve the top-20 most embedding-similar facts
+- Primary filter: exact `scope` match.
+- Secondary fallback: if no matches in exact scope, retrieve globally with a higher similarity threshold (`> 0.85`) to catch scope fragmentation (e.g., "auth" vs "authentication").
 - Filter to `cosine_similarity > 0.65` (below this threshold, facts are unlikely to be about the same subject)
 
 **Step 2 — LLM contradiction check**
@@ -189,6 +192,7 @@ If `contradicts: true`, insert into `conflicts` table. Do not deduplicate agains
 **Step 4 — Stale supersession check**
 
 If `f_new` and `f_candidate` are from the same agent, same scope, and high similarity (> 0.85): mark `f_candidate.superseded_by = f_new.id`. This handles the read-time conflict case: an agent refining its own prior belief.
+*Implementation Note:* To prevent race conditions from concurrent identical commits, this step must use an atomic SQLite `UPDATE ... WHERE superseded_by IS NULL` transaction.
 
 ### Conflict severity heuristic
 
@@ -369,6 +373,24 @@ MIRIX's six memory types and A-Mem's box structure both point to the same princi
 
 **6. Conflict detection must be async and non-blocking**
 Committing a fact should return immediately. Detection runs in the background. Blocking commits on LLM inference would make the write path unusable in practice.
+
+---
+
+## Failure Modes & Architectural Mitigations
+
+Based on an analysis of current multi-agent memory constraints, several critical failure modes have been explicitly addressed in this design:
+
+**1. The "Blind Read" (Stale Facts / Knowledge Decay)**
+- *Failure Mode:* Vector databases natively treat all stored records as equally valid. An agent might query a fact that is currently disputed by another agent, and unknowingly use it as ground truth.
+- *Mitigation:* `engram_query` guarantees it surfaces `has_open_conflict` for every returned fact, forcing the reading agent to acknowledge the dispute, wait for resolution, or explicitly choose a side via `engram_resolve`.
+
+**2. Async Race Conditions (Lost Updates)**
+- *Failure Mode:* If two agents highly concurrently commit contradictory facts, the async conflict pipeline might interleave, causing incomplete supersession or dropping the conflict entirely. 
+- *Mitigation:* SQLite's explicit atomic transactions are used during the `superseded_by` update step. The `conflicts` table acts as a dead-letter queue for contradictory facts that bypass initial synchronous checks.
+
+**3. Scope Fragmentation (Context drift)**
+- *Failure Mode:* An agent commits a fact to `payment/webhook`, and another to `payments/webhooks`. Exact string matching filters out the conflict, creating two bifurcated realties.
+- *Mitigation:* Candidate retrieval (Phase 3, Step 1) supplements precise scope filtering with a global high-similarity fallback to explicitly catch overlapping semantic domains.
 
 ---
 
