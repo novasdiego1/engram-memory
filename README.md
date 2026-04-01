@@ -1,11 +1,5 @@
 <div align="center">
 
-<br />
-
-<img src="./assets/banner.svg" alt="Engram" width="860"/>
-
-<br />
-
 **Multi-agent memory consistency for engineering teams.**
 
 <br />
