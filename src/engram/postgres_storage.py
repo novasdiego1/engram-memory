@@ -75,7 +75,7 @@ class PostgresStorage(BaseStorage):
             "keywords", "entities", "artifact_hash", "embedding",
             "embedding_model", "embedding_ver", "committed_at",
             "valid_from", "valid_until", "ttl_days",
-            "memory_op", "supersedes_fact_id", "workspace_id",
+            "memory_op", "supersedes_fact_id", "workspace_id", "durability",
         ]
         placeholders = ", ".join(f"${i+1}" for i in range(len(cols)))
         col_names = ", ".join(cols)
@@ -150,6 +150,7 @@ class PostgresStorage(BaseStorage):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        include_ephemeral: bool = False,
     ) -> list[dict]:
         conditions = ["workspace_id = $1"]
         params: list[Any] = [self.workspace_id]
@@ -174,6 +175,9 @@ class PostgresStorage(BaseStorage):
             conditions.append(f"fact_type = ${idx}")
             params.append(fact_type)
             idx += 1
+
+        if not include_ephemeral:
+            conditions.append("durability = 'durable'")
 
         params.append(limit)
         where = " AND ".join(conditions)
@@ -215,6 +219,37 @@ class PostgresStorage(BaseStorage):
                 fact_id, self.workspace_id,
             )
         return _row_to_dict(row) if row else None
+
+    async def promote_fact(self, fact_id: str) -> bool:
+        """Promote an ephemeral fact to durable. Returns True if promoted."""
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE facts SET durability = 'durable' "
+                "WHERE id = $1 AND durability = 'ephemeral' AND workspace_id = $2",
+                fact_id, self.workspace_id,
+            )
+        return result.split()[-1] != "0"
+
+    async def increment_query_hits(self, fact_ids: list[str]) -> None:
+        """Increment query_hits counter for the given fact IDs."""
+        if not fact_ids:
+            return
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE facts SET query_hits = query_hits + 1 "
+                "WHERE id = ANY($1::text[]) AND workspace_id = $2",
+                fact_ids, self.workspace_id,
+            )
+
+    async def get_promotable_ephemeral_facts(self, min_hits: int = 2) -> list[dict]:
+        """Return ephemeral facts that have been queried enough times to auto-promote."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM facts WHERE durability = 'ephemeral' AND valid_until IS NULL "
+                "AND query_hits >= $1 AND workspace_id = $2",
+                min_hits, self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
 
     # ── Entity-based lookups ─────────────────────────────────────────
 

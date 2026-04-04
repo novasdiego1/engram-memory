@@ -1571,6 +1571,76 @@ an estimated 80–85%, but the remaining 15–20% requires human judgment.
 
 ---
 
+## Phase 8 — Ephemeral Memory
+
+**Goal:** Provide a scratchpad tier for in-progress observations that haven't proven
+their value, implementing the "proved useful more than once" heuristic for memory
+retention.
+
+### Motivation
+
+Persistent memory helps until it starts introducing assumptions you never explicitly
+designed. The literature (Yu et al. [1]) identifies a three-layer memory hierarchy:
+I/O, cache, and memory. Engram's fact store is the memory layer. Ephemeral memory
+fills the cache layer — fast, limited-capacity, short-lived observations that may or
+may not graduate to persistent knowledge.
+
+The core insight: **selective forgetting is a feature, not a failure mode.** An agent
+that forgets more but makes fewer weird assumptions is easier to work with than one
+that remembers everything and pulls in stale context. Ephemeral memory makes this
+tradeoff explicit and controllable.
+
+### Design
+
+Two durability tiers on the `facts` table:
+
+| Tier | Default TTL | In queries | Conflict detection | Promotion |
+|---|---|---|---|---|
+| `durable` (default) | None (permanent) | Yes | Yes | N/A |
+| `ephemeral` | 1 day | Only with `include_ephemeral=true` | No | Auto at 2 query hits, or explicit via `engram_promote` |
+
+**Schema additions (v6):**
+```sql
+ALTER TABLE facts ADD COLUMN durability TEXT NOT NULL DEFAULT 'durable';
+ALTER TABLE facts ADD COLUMN query_hits INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_facts_durability ON facts(durability, valid_until);
+```
+
+### Lifecycle
+
+1. Agent commits with `durability="ephemeral"` — the fact is stored with a 1-day TTL
+   (unless overridden) and excluded from default queries.
+2. When another agent queries with `include_ephemeral=true` and the ephemeral fact
+   appears in results, its `query_hits` counter increments.
+3. Once `query_hits >= 2`, the fact is automatically promoted to `durable`: its
+   `durability` column flips, it becomes visible in default queries, and it enters
+   the conflict detection pipeline.
+4. Alternatively, an agent can call `engram_promote(fact_id)` to fast-track promotion.
+5. Ephemeral facts that are never queried expire via the standard TTL mechanism.
+
+### Why skip conflict detection for ephemeral facts
+
+Conflict detection is the most expensive operation in the pipeline (2–5s on CPU).
+Running it on scratchpad observations that will likely expire in 24 hours wastes
+compute and inflates the conflict queue with noise. When an ephemeral fact proves
+its value (via query hits or explicit promotion), it enters the detection pipeline
+at promotion time — the same detection that would have run at commit time, just
+deferred until the fact has earned it.
+
+### MCP Tool Changes
+
+- `engram_commit` gains `durability` parameter (`"durable"` | `"ephemeral"`)
+- `engram_query` gains `include_ephemeral` parameter (default `false`)
+- New tool: `engram_promote(fact_id)` — explicit promotion of ephemeral facts
+
+### Scoring
+
+Ephemeral facts that appear in query results (when `include_ephemeral=true`) are
+scored with a 0.6× multiplier, ranking them below durable facts. This ensures
+scratchpad observations don't crowd out verified team knowledge.
+
+---
+
 ## Delivery Sequence
 
 | Phase | Deliverable | Unlocks |
@@ -1583,6 +1653,7 @@ an estimated 80–85%, but the remaining 15–20% requires human judgment.
 | 5 | Access control + MINJA defense (scope permissions, rate limiting, agent reliability) | Production hardening |
 | 6 | Federation (replicated journal) | Multi-team / org-wide |
 | 7 | Dashboard (with expiry view) | Human oversight |
+| 8 | Ephemeral memory (durability tiers, auto-promotion, scratchpad) | Selective forgetting, reduced noise |
 
 Phases 0–3 are the minimum viable Engram. **Phase 0 is what makes it distributable** —
 without agent-native onboarding, team setup requires humans reading docs and running

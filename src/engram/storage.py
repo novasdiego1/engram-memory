@@ -51,6 +51,7 @@ class BaseStorage(ABC):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        include_ephemeral: bool = False,
     ) -> list[dict]: ...
 
     @abstractmethod
@@ -61,6 +62,21 @@ class BaseStorage(ABC):
 
     @abstractmethod
     async def get_fact_by_id(self, fact_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def promote_fact(self, fact_id: str) -> bool:
+        """Promote an ephemeral fact to durable. Returns True if promoted."""
+        ...
+
+    @abstractmethod
+    async def increment_query_hits(self, fact_ids: list[str]) -> None:
+        """Increment query_hits counter for the given fact IDs."""
+        ...
+
+    @abstractmethod
+    async def get_promotable_ephemeral_facts(self, min_hits: int = 2) -> list[dict]:
+        """Return ephemeral facts that have been queried enough times to auto-promote."""
+        ...
 
     @abstractmethod
     async def find_entity_conflicts(
@@ -282,9 +298,9 @@ class SQLiteStorage(BaseStorage):
             "keywords", "entities", "artifact_hash", "embedding",
             "embedding_model", "embedding_ver", "committed_at",
             "valid_from", "valid_until", "ttl_days",
-            "memory_op", "supersedes_fact_id",
+            "memory_op", "supersedes_fact_id", "durability",
         ]
-        defaults = {"memory_op": "add"}
+        defaults = {"memory_op": "add", "durability": "durable"}
         placeholders = ", ".join(["?"] * len(cols))
         col_names = ", ".join(cols)
         values = [fact.get(c, defaults.get(c)) for c in cols]
@@ -341,6 +357,7 @@ class SQLiteStorage(BaseStorage):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        include_ephemeral: bool = False,
     ) -> list[dict]:
         """Retrieve currently valid facts, optionally filtered."""
         conditions = []
@@ -361,6 +378,9 @@ class SQLiteStorage(BaseStorage):
         if fact_type:
             conditions.append("fact_type = ?")
             params.append(fact_type)
+
+        if not include_ephemeral:
+            conditions.append("durability = 'durable'")
 
         where = " AND ".join(conditions) if conditions else "1=1"
         params.append(limit)
@@ -395,6 +415,36 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute("SELECT * FROM facts WHERE id = ?", (fact_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+    async def promote_fact(self, fact_id: str) -> bool:
+        """Promote an ephemeral fact to durable. Returns True if promoted."""
+        cursor = await self.db.execute(
+            "UPDATE facts SET durability = 'durable' WHERE id = ? AND durability = 'ephemeral'",
+            (fact_id,),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def increment_query_hits(self, fact_ids: list[str]) -> None:
+        """Increment query_hits counter for the given fact IDs."""
+        if not fact_ids:
+            return
+        placeholders = ",".join(["?"] * len(fact_ids))
+        await self.db.execute(
+            f"UPDATE facts SET query_hits = query_hits + 1 WHERE id IN ({placeholders})",
+            fact_ids,
+        )
+        await self.db.commit()
+
+    async def get_promotable_ephemeral_facts(self, min_hits: int = 2) -> list[dict]:
+        """Return ephemeral facts that have been queried enough times to auto-promote."""
+        cursor = await self.db.execute(
+            "SELECT * FROM facts WHERE durability = 'ephemeral' AND valid_until IS NULL "
+            "AND query_hits >= ?",
+            (min_hits,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
     # ── Entity-based lookups (for Tier 0 / Tier 2b detection) ────────
 

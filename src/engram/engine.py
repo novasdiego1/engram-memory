@@ -83,8 +83,18 @@ class EngramEngine:
         ttl_days: int | None = None,
         artifact_hash: str | None = None,
         operation: str = "add",
+        durability: str = "durable",
     ) -> dict[str, Any]:
         """Commit a fact to shared memory. Returns immediately; detection is async.
+
+        The ``durability`` parameter controls the fact's lifecycle:
+        - ``durable`` (default) — persists until superseded or expired.
+          Included in query results by default.  Triggers conflict detection.
+        - ``ephemeral`` — short-lived scratchpad memory.  Excluded from
+          query results unless explicitly requested.  Skips conflict
+          detection.  Auto-expires after ``ttl_days`` (default 1 day for
+          ephemeral).  Automatically promoted to durable when queried
+          at least twice (the "proved useful more than once" heuristic).
 
         The ``operation`` parameter follows the MemFactory CRUD pattern:
         - ``add``    (default) — insert a new independent fact.
@@ -102,6 +112,8 @@ class EngramEngine:
         # Step 1: Validate
         if operation not in ("add", "update", "delete", "none"):
             raise ValueError("operation must be 'add', 'update', 'delete', or 'none'.")
+        if durability not in ("durable", "ephemeral"):
+            raise ValueError("durability must be 'durable' or 'ephemeral'.")
 
         # none — caller signals no new information; return without writing
         if operation == "none":
@@ -140,6 +152,10 @@ class EngramEngine:
             raise ValueError("Confidence must be between 0.0 and 1.0.")
         if fact_type not in ("observation", "inference", "decision"):
             raise ValueError("fact_type must be 'observation', 'inference', or 'decision'.")
+
+        # Ephemeral facts default to 1-day TTL if none specified
+        if durability == "ephemeral" and ttl_days is None:
+            ttl_days = 1
 
         # Step 1b: Privacy enforcement — strip engineer/agent_id if workspace requires it
         try:
@@ -264,6 +280,7 @@ class EngramEngine:
             "ttl_days": ttl_days,
             "memory_op": operation,
             "supersedes_fact_id": supersedes_fact_id,
+            "durability": durability,
         }
 
         # Step 11: INSERT (write lock held ~1ms)
@@ -272,8 +289,9 @@ class EngramEngine:
         # Step 12: Increment agent commit count
         await self.storage.increment_agent_commits(agent_id)
 
-        # Step 13: Queue for async detection
-        await self._detection_queue.put(fact_id)
+        # Step 13: Queue for async detection (skip for ephemeral facts)
+        if durability == "durable":
+            await self._detection_queue.put(fact_id)
 
         # Step 14: Check for corroboration (Phase 2: multi-agent consensus)
         # Find semantically similar facts from different agents in the same scope
@@ -286,6 +304,7 @@ class EngramEngine:
             "conflicts_detected": False,  # detection is async
             "memory_op": operation,
             "supersedes_fact_id": supersedes_fact_id,
+            "durability": durability,
         }
 
     # ── engram_query ─────────────────────────────────────────────────
@@ -297,6 +316,7 @@ class EngramEngine:
         limit: int = 10,
         as_of: str | None = None,
         fact_type: str | None = None,
+        include_ephemeral: bool = False,
     ) -> list[dict[str, Any]]:
         """Query what the team's agents collectively know about a topic.
         
@@ -305,12 +325,19 @@ class EngramEngine:
         - Boosts facts with provenance (verified claims)
         - Rewards multi-agent corroboration
         - Penalizes facts with open conflicts
+        
+        When ``include_ephemeral`` is True, ephemeral (scratchpad) facts are
+        included in results alongside durable facts.  Ephemeral facts that
+        appear in query results have their ``query_hits`` counter incremented;
+        once a fact reaches 2 hits it is automatically promoted to durable
+        (the "proved useful more than once" heuristic).
         """
         limit = min(limit, 50)
 
         # Get candidate facts
         candidates = await self.storage.get_current_facts_in_scope(
-            scope=scope, fact_type=fact_type, as_of=as_of, limit=200
+            scope=scope, fact_type=fact_type, as_of=as_of, limit=200,
+            include_ephemeral=include_ephemeral,
         )
         if not candidates:
             return []
@@ -406,12 +433,16 @@ class EngramEngine:
             score = (
                 relevance
                 + 0.2 * recency
-                + 0.15 * agent_trust
+                + 0.15 * trust
                 + 0.1 * fact_type_weight
                 + 0.1 * provenance_weight
                 + 0.1 * corroboration_weight
                 + 0.05 * entity_density
             )
+
+            # Ephemeral facts rank lower than durable facts
+            if fact.get("durability") == "ephemeral":
+                score *= 0.6
 
             # Penalize facts with unresolved conflicts — value shouldn't
             # require a human to review before the ranking reflects uncertainty
@@ -425,7 +456,11 @@ class EngramEngine:
 
         # Build response
         results: list[dict[str, Any]] = []
+        ephemeral_ids: list[str] = []
         for score, fact in scored[:limit]:
+            is_ephemeral = fact.get("durability") == "ephemeral"
+            if is_ephemeral:
+                ephemeral_ids.append(fact["id"])
             results.append({
                 "fact_id": fact["id"],
                 "content": fact["content"],
@@ -439,15 +474,61 @@ class EngramEngine:
                 "provenance": fact.get("provenance"),
                 "corroborating_agents": fact.get("corroborating_agents", 0),
                 "relevance_score": round(score, 4),
+                "durability": fact.get("durability", "durable"),
             })
 
+        # Track query hits on ephemeral facts and auto-promote if threshold met
+        if ephemeral_ids:
+            await self.storage.increment_query_hits(ephemeral_ids)
+            # Auto-promote ephemeral facts that have now been queried enough
+            promotable = await self.storage.get_promotable_ephemeral_facts(min_hits=2)
+            for pf in promotable:
+                promoted = await self.storage.promote_fact(pf["id"])
+                if promoted:
+                    logger.info(
+                        "Auto-promoted ephemeral fact %s to durable (query_hits >= 2)",
+                        pf["id"][:12],
+                    )
+
         return results
+
+    # ── engram_promote ──────────────────────────────────────────────
+
+    async def promote(self, fact_id: str) -> dict[str, Any]:
+        """Promote an ephemeral fact to durable.
+
+        This makes the fact visible in default queries and enables conflict
+        detection for it.  Use this when an ephemeral observation has proven
+        its value and should become part of the team's persistent knowledge.
+        """
+        fact = await self.storage.get_fact_by_id(fact_id)
+        if not fact:
+            raise ValueError(f"Fact {fact_id} not found.")
+        if fact.get("durability") != "ephemeral":
+            raise ValueError(f"Fact {fact_id} is already durable.")
+        if fact.get("valid_until") is not None:
+            raise ValueError(f"Fact {fact_id} has already expired or been superseded.")
+
+        promoted = await self.storage.promote_fact(fact_id)
+        if not promoted:
+            raise ValueError(f"Failed to promote fact {fact_id}.")
+
+        # Now that it's durable, queue it for conflict detection
+        await self._detection_queue.put(fact_id)
+
+        logger.info("Promoted ephemeral fact %s to durable", fact_id[:12])
+        return {
+            "promoted": True,
+            "fact_id": fact_id,
+            "durability": "durable",
+        }
 
     # ── engram_conflicts ─────────────────────────────────────────────
 
     async def get_conflicts(
         self, scope: str | None = None, status: str = "open"
     ) -> list[dict[str, Any]]:
+
         """Get conflicts, optionally filtered by scope and status."""
         rows = await self.storage.get_conflicts(scope=scope, status=status)
         results = []

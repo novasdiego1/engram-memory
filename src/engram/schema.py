@@ -10,7 +10,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -51,6 +51,11 @@ MIGRATIONS: dict[int, list[str]] = {
         # Phase 2: Corroboration tracking for multi-agent consensus
         "ALTER TABLE facts ADD COLUMN corroborating_agents INTEGER NOT NULL DEFAULT 0",
     ],
+    6: [
+        # Ephemeral memory: durability tier + query hit tracking for auto-promotion
+        "ALTER TABLE facts ADD COLUMN durability TEXT NOT NULL DEFAULT 'durable'",
+        "ALTER TABLE facts ADD COLUMN query_hits INTEGER NOT NULL DEFAULT 0",
+    ],
 }
 
 # ── SQLite schema (local mode) ───────────────────────────────────────
@@ -85,7 +90,9 @@ CREATE TABLE IF NOT EXISTS facts (
     memory_op        TEXT NOT NULL DEFAULT 'add',
     supersedes_fact_id TEXT,
     workspace_id     TEXT NOT NULL DEFAULT 'local',
-    corroborating_agents INTEGER NOT NULL DEFAULT 0
+    corroborating_agents INTEGER NOT NULL DEFAULT 0,
+    durability       TEXT NOT NULL DEFAULT 'durable',
+    query_hits       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_facts_validity     ON facts(scope, valid_until);
@@ -94,6 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_lineage      ON facts(lineage_id);
 CREATE INDEX IF NOT EXISTS idx_facts_agent        ON facts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_facts_type         ON facts(fact_type);
 CREATE INDEX IF NOT EXISTS idx_facts_workspace    ON facts(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_facts_durability   ON facts(durability, valid_until);
 
 -- FTS5 for lexical retrieval
 CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
@@ -227,6 +235,8 @@ CREATE TABLE IF NOT EXISTS facts (
     supersedes_fact_id TEXT,
     workspace_id     TEXT NOT NULL DEFAULT 'local',
     corroborating_agents INTEGER NOT NULL DEFAULT 0,
+    durability       TEXT NOT NULL DEFAULT 'durable',
+    query_hits       INTEGER NOT NULL DEFAULT 0,
     search_vector    tsvector GENERATED ALWAYS AS (
         to_tsvector('english', coalesce(content, '') || ' ' || coalesce(scope, '') || ' ' || coalesce(keywords, ''))
     ) STORED
@@ -238,6 +248,7 @@ CREATE INDEX IF NOT EXISTS idx_facts_lineage      ON facts(lineage_id);
 CREATE INDEX IF NOT EXISTS idx_facts_agent        ON facts(agent_id);
 CREATE INDEX IF NOT EXISTS idx_facts_type         ON facts(fact_type);
 CREATE INDEX IF NOT EXISTS idx_facts_workspace    ON facts(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_facts_durability   ON facts(durability, valid_until);
 CREATE INDEX IF NOT EXISTS idx_facts_fts          ON facts USING GIN(search_vector);
 CREATE INDEX IF NOT EXISTS idx_facts_embedding    ON facts USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100);
 

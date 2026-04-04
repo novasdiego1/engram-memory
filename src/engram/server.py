@@ -341,6 +341,7 @@ async def engram_commit(
     fact_type: str = "observation",
     ttl_days: int | None = None,
     operation: str = "add",
+    durability: str = "durable",
 ) -> dict[str, Any]:
     """Commit a claim about the codebase to shared team memory.
 
@@ -397,9 +398,19 @@ async def engram_commit(
         "delete" — retire an existing fact without replacement; requires
                    corrects_lineage (the lineage_id to close).
         "none"   — no-op; signals the agent has nothing new to add.
+    - durability: Memory tier. One of:
+        "durable"   (default) — persistent fact. Included in queries by
+                     default. Triggers conflict detection. Use for verified
+                     discoveries that the team should know about.
+        "ephemeral" — scratchpad memory. Excluded from queries unless
+                     include_ephemeral=true is passed. Skips conflict
+                     detection. Auto-expires after ttl_days (default 1 day).
+                     Automatically promoted to durable when queried at least
+                     twice. Use for in-progress observations, hypotheses,
+                     or context that hasn't proven its value yet.
 
     Returns: {fact_id, committed_at, duplicate, conflicts_detected,
-              memory_op, supersedes_fact_id}
+              memory_op, supersedes_fact_id, durability}
     """
     engine = get_engine()
 
@@ -432,6 +443,7 @@ async def engram_commit(
         fact_type=fact_type,
         ttl_days=ttl_days,
         operation=operation,
+        durability=durability,
     )
 
     # Record rate limit usage after successful commit
@@ -454,6 +466,7 @@ async def engram_query(
     as_of: str | None = None,
     fact_type: str | None = None,
     agent_id: str | None = None,
+    include_ephemeral: bool = False,
 ) -> list[dict[str, Any]]:
     """Query what your team's agents collectively know about a topic.
 
@@ -483,10 +496,16 @@ async def engram_query(
     - agent_id: Your agent identifier. Used for read permission checks
       when the server runs in auth mode (--auth flag). Match the same
       agent_id you use when calling engram_commit.
+    - include_ephemeral: When true, includes ephemeral (scratchpad) facts
+      alongside durable facts. Ephemeral facts are short-lived observations
+      that haven't proven their value yet. They rank lower than durable
+      facts. Ephemeral facts that appear in query results are tracked;
+      once queried twice they are automatically promoted to durable.
+      Default: false.
 
     Returns: List of claims with content, scope, confidence, agent_id,
-    committed_at, has_open_conflict, verified, fact_type, and provenance
-    metadata.
+    committed_at, has_open_conflict, verified, fact_type, durability,
+    and provenance metadata.
     """
     engine = get_engine()
 
@@ -505,6 +524,7 @@ async def engram_query(
         limit=limit,
         as_of=as_of,
         fact_type=fact_type,
+        include_ephemeral=include_ephemeral,
     )
 
 
@@ -581,3 +601,34 @@ async def engram_resolve(
         resolution=resolution,
         winning_claim_id=winning_claim_id,
     )
+
+
+# ── engram_promote ───────────────────────────────────────────────────
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    },
+)
+async def engram_promote(fact_id: str) -> dict[str, Any]:
+    """Promote an ephemeral fact to durable persistent memory.
+
+    Use this when an ephemeral observation has proven its value and should
+    become part of the team's persistent knowledge base. Promotion makes
+    the fact visible in default queries and enables conflict detection.
+
+    Ephemeral facts are also auto-promoted when they appear in query
+    results at least twice (the "proved useful more than once" heuristic),
+    so explicit promotion is only needed when you want to fast-track a
+    fact you know is valuable.
+
+    Parameters:
+    - fact_id: The ID of the ephemeral fact to promote.
+
+    Returns: {promoted: true, fact_id, durability: "durable"}
+    """
+    engine = get_engine()
+    return await engine.promote(fact_id=fact_id)
