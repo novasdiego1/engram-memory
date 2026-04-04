@@ -48,74 +48,86 @@ Your agent handles the rest. Works with Claude Code, Claude Desktop, Cursor, Win
 
 ### Creating a Workspace
 
-```
-Agent: "Do you have an Invite Key to join an existing workspace,
-        or are you setting up a new one?"
+> 🤖 **Agent**
+>
+> Do you have an Invite Key to join an existing workspace, or are you setting up a new one?
 
-You:   "New"
+> 👤 **You**
+>
+> New
 
-Agent: "Add your database connection string to your environment.
-        
-        Create a .env file in your project root with:
-        
-          ENGRAM_DB_URL='postgres://...'
-        
-        IMPORTANT: Don't paste your database URL in this chat.
-        
-        You can:
-          • Use your existing app database (Engram creates a separate 'engram' schema)
-          • Get a free dedicated database at neon.tech, supabase.com, or railway.app
-        
-        Once set, restart this chat and I'll detect it automatically."
+> 🤖 **Agent**
+>
+> Do you already have a PostgreSQL database for this project?
+>
+> - **Yes** → Great, Engram will create a separate `engram` schema inside your existing database. Your app tables are untouched.
+> - **No** → No problem. You can get a free one in under a minute:
+>   - [Neon](https://neon.tech) — Serverless Postgres
+>   - [Supabase](https://supabase.com) — Open source Firebase alternative
+>   - [Railway](https://railway.app) — Deploy in minutes
+> - **Just testing locally?** → Skip the database entirely. Engram runs on SQLite by default — no setup needed.
 
-[You set ENGRAM_DB_URL in .env]
+> 👤 **You**
+>
+> I have one already
 
-Agent: "Your team workspace is ready.
-        
-        Engram tables are in the 'engram' schema — isolated from your app.
+> 🤖 **Agent**
+>
+> Add your connection string to a `.env` file in your project root:
+>
+> ```
+> ENGRAM_DB_URL='postgres://user:pass@host:5432/mydb'
+> ```
+>
+> ⚠️ Don't paste your database URL in this chat — keep it in `.env` or an environment variable.
+>
+> Engram creates all its tables in a separate `engram` schema, so there's zero conflict with your existing tables. Once set, restart this chat and I'll detect it automatically.
 
-        Share this Invite Key with teammates:
-          ek_live_abc123...
+*You set `ENGRAM_DB_URL` in `.env` and restart*
 
-        Should commits show who made them, or stay anonymous?"
-```
-
-### Joining a Workspace
-
-```
-Agent: "Do you have an Invite Key to join an existing workspace,
-        or are you setting up a new one?"
-
-You:   "Join"
-
-Agent: "What's your Invite Key?"
-
-You:   "ek_live_abc123..."
-
-Agent: "You're in. I'll query team memory before starting any task."
-```
-
-**That's it.** Teammates only need the Invite Key. The workspace ID and database connection are encrypted inside it.
+> 🤖 **Agent**
+>
+> Your team workspace is ready.
+>
+> Engram tables are in the `engram` schema — fully isolated from your app.
+>
+> Share this Invite Key with teammates:
+> ```
+> ek_live_abc123...
+> ```
+>
+> That's all they need — the database connection is encrypted inside it.
+>
+> Should commits show who made them, or stay anonymous?
 
 ---
 
-## Database Options
+### Joining a Workspace
 
-**Use your existing app database:**
-- Engram creates all tables in a separate `engram` schema
-- No table name conflicts
-- Single database connection
-- Easy backup: `pg_dump -n engram`
+> 🤖 **Agent**
+>
+> Do you have an Invite Key to join an existing workspace, or are you setting up a new one?
 
-**Or get a free PostgreSQL database:**
-- [Neon](https://neon.tech) — Serverless Postgres
-- [Supabase](https://supabase.com) — Open source Firebase alternative
-- [Railway](https://railway.app) — Deploy in minutes
+> 👤 **You**
+>
+> Join — here's my key: `ek_live_abc123...`
 
-**For local development:**
-- SQLite mode (no database needed)
-- Limited to single machine
-- Good for testing
+> 🤖 **Agent**
+>
+> You're in. I'll query team memory before starting work on anything.
+
+**That's it.** Teammates only need the Invite Key. No database URL, no Team ID, no configuration. Everything is encrypted inside the key.
+
+---
+
+## Do I Need My Own Database?
+
+| Situation | What to do |
+|---|---|
+| **I have a PostgreSQL database for this project** | Point `ENGRAM_DB_URL` at it. Engram creates a separate `engram` schema — your app tables are untouched. |
+| **I don't have a database yet** | Grab a free one from [Neon](https://neon.tech), [Supabase](https://supabase.com), or [Railway](https://railway.app). Takes under a minute. |
+| **I'm just trying it out locally** | Do nothing. Engram defaults to SQLite (`~/.engram/knowledge.db`) — no database needed. |
+| **A teammate invited me** | Just paste the Invite Key. The database connection is encrypted inside it — you don't need to set up anything. |
 
 ---
 
@@ -168,6 +180,7 @@ Team sharing works through the shared database — no HTTP server, no port forwa
 | `engram_query` | Pull what your team's agents know |
 | `engram_conflicts` | Surface contradictions |
 | `engram_resolve` | Settle disagreements |
+| `engram_promote` | Graduate ephemeral memory to durable |
 
 ---
 
@@ -186,6 +199,21 @@ Commits return instantly. Detection completes in the background (~2-10s on CPU).
 
 ---
 
+## Memory That Forgets on Purpose
+
+Engram doesn't just accumulate — it actively forgets what doesn't earn its place.
+
+> Persistent memory helps until it starts introducing assumptions you never explicitly designed.
+
+- **Ephemeral memory** — Scratchpad facts auto-expire in 24h unless queried twice ("proved useful more than once")
+- **Importance decay** — Unverified inferences expire after 30 days. Unverified observations expire after 90 days.
+- **Protected facts** — Decisions, verified facts, and corroborated claims are never auto-retired.
+- **Steeper recency curve** — A 90-day-old fact scores 0.001 in retrieval. Old context stops crowding out what matters now.
+
+Grounded in the [FiFA/MaRS research](https://arxiv.org/abs/2512.12856) on forgetting-by-design for cognitive agents.
+
+---
+
 ## Research Foundation
 
 Engram is grounded in peer-reviewed research on multi-agent memory systems:
@@ -194,6 +222,7 @@ Engram is grounded in peer-reviewed research on multi-agent memory systems:
 - **[Xu et al. (2025)](https://arxiv.org/abs/2502.12110)** — A-Mem's Zettelkasten structure for fact enrichment
 - **[Rasmussen et al. (2025)](https://arxiv.org/abs/2501.13956)** — Graphiti's bitemporal modeling for temporal validity
 - **[Hu et al. (2026)](https://arxiv.org/abs/2512.13564)** — Survey confirming shared memory as an open frontier
+- **[Alqithami (2025)](https://arxiv.org/abs/2512.12856)** — FiFA: forgetting-by-design improves agent coherence
 
 Full literature review: [`LITERATURE.md`](./LITERATURE.md)  
 Implementation details: [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md)
