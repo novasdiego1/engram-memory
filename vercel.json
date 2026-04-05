@@ -1,6 +1,6 @@
 {
   "framework": null,
-  "installCommand": "pip install starlette asyncpg mcp pydantic uvicorn",
+  "installCommand": "pip install starlette asyncpg mcp pydantic uvicorn stripe",
   "buildCommand": "",
   "outputDirectory": ".",
   "functions": {
@@ -19,11 +19,21 @@
     },
     "api/dashboard_page.py": {
       "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+    },
+    "api/auth.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+    },
+    "api/billing.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
     }
   },
   "rewrites": [
     { "source": "/mcp", "destination": "/api/mcp" },
     { "source": "/mcp/(.*)", "destination": "/api/mcp" },
+    { "source": "/auth", "destination": "/api/auth" },
+    { "source": "/auth/(.*)", "destination": "/api/auth" },
+    { "source": "/billing", "destination": "/api/billing" },
+    { "source": "/billing/(.*)", "destination": "/api/billing" },
     { "source": "/workspace", "destination": "/api/workspace" },
     { "source": "/workspace/(.*)", "destination": "/api/workspace" },
     { "source": "/install", "destination": "/api/install" },

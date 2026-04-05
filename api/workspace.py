@@ -170,11 +170,108 @@ async def handle_search(request: Request) -> JSONResponse:
     )
 
 
+async def handle_session_search(request: Request) -> JSONResponse:
+    """Session-cookie-authenticated workspace data fetch (for dashboard UI)."""
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import json as _json
+    import time as _time
+    import base64 as _base64
+
+    def _get_session(req: Request) -> dict | None:
+        token = req.cookies.get("engram_session")
+        if not token:
+            return None
+        secret = (os.environ.get("ENGRAM_JWT_SECRET") or "engram-dev-secret-change-in-production").encode()
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        hdr, body, sig = parts
+        msg = f"{hdr}.{body}".encode()
+        expected = _base64.urlsafe_b64encode(
+            _hmac.new(secret, msg, _hashlib.sha256).digest()
+        ).rstrip(b"=").decode()
+        if not _hmac.compare_digest(sig, expected):
+            return None
+        padded = body + "=" * (4 - len(body) % 4)
+        payload = _json.loads(_base64.urlsafe_b64decode(padded))
+        if payload.get("exp", 0) < int(_time.time()):
+            return None
+        return payload
+
+    session = _get_session(request)
+    if not session:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    engram_id = request.query_params.get("engram_id", "").strip()
+    if not engram_id:
+        return JSONResponse({"error": "engram_id required"}, status_code=400)
+
+    try:
+        pool = await _get_pool()
+    except Exception as exc:
+        return JSONResponse({"error": f"Database connection failed: {exc}"}, status_code=500)
+
+    # Verify user owns this workspace
+    try:
+        async with pool.acquire() as conn:
+            owns = await conn.fetchrow(
+                "SELECT 1 FROM user_workspaces WHERE user_id = $1 AND engram_id = $2",
+                session["sub"], engram_id,
+            )
+    except Exception:
+        owns = None
+
+    if not owns:
+        return JSONResponse({"error": "Workspace not found or access denied"}, status_code=403)
+
+    try:
+        async with pool.acquire() as conn:
+            fact_rows = await conn.fetch(
+                """SELECT id, lineage_id, content, scope, confidence, fact_type,
+                          committed_at, valid_until, memory_op, supersedes_fact_id, durability
+                   FROM facts
+                   WHERE workspace_id = $1
+                   ORDER BY committed_at DESC
+                   LIMIT 500""",
+                engram_id,
+            )
+            conflict_rows = await conn.fetch(
+                """SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
+                   FROM conflicts
+                   WHERE workspace_id = $1
+                   ORDER BY detected_at DESC
+                   LIMIT 200""",
+                engram_id,
+            )
+            agent_rows = await conn.fetch(
+                """SELECT agent_id, engineer, label, last_seen, total_commits
+                   FROM agents WHERE workspace_id = $1""",
+                engram_id,
+            )
+    except Exception as exc:
+        return JSONResponse({"error": f"Query failed: {exc}"}, status_code=500)
+
+    def _ser(v: Any) -> Any:
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return v
+
+    facts = [{k: _ser(v) for k, v in dict(r).items()} for r in fact_rows]
+    conflicts = [{k: _ser(v) for k, v in dict(r).items()} for r in conflict_rows]
+    agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
+
+    return JSONResponse(
+        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
 async def handle_options(request: Request) -> Response:
     return Response(
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
         }
     )
@@ -182,8 +279,9 @@ async def handle_options(request: Request) -> Response:
 
 app = Starlette(
     routes=[
-        Route("/workspace/search", handle_search, methods=["POST"]),
-        Route("/workspace/search", handle_options, methods=["OPTIONS"]),
-        Route("/workspace/{path:path}", handle_search, methods=["POST"]),
+        Route("/workspace/search",  handle_search,         methods=["POST"]),
+        Route("/workspace/search",  handle_options,        methods=["OPTIONS"]),
+        Route("/workspace/session", handle_session_search, methods=["GET"]),
+        Route("/workspace/{path:path}", handle_search,     methods=["POST"]),
     ]
 )

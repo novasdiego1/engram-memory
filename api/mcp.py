@@ -33,6 +33,9 @@ logger = logging.getLogger("engram")
 DB_URL = os.environ.get("ENGRAM_DB_URL", "")
 SCHEMA = "engram"
 
+# Billing
+HOBBY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MiB — same as Neon's free tier
+
 # ── Schema SQL ───────────────────────────────────────────────────────
 
 _SCHEMA_SQL = """
@@ -104,6 +107,28 @@ CREATE TABLE IF NOT EXISTS agents (
     last_seen     TIMESTAMPTZ,
     total_commits INTEGER DEFAULT 0,
     PRIMARY KEY (agent_id, workspace_id)
+);
+
+-- Billing / quota columns on workspaces
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS paused         BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS storage_bytes  BIGINT  NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan           TEXT    NOT NULL DEFAULT 'hobby';
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+
+-- User accounts (managed by api/auth.py but schema lives here so it runs on first MCP call)
+CREATE TABLE IF NOT EXISTS users (
+    id                 TEXT PRIMARY KEY,
+    email              TEXT UNIQUE NOT NULL,
+    password_hash      TEXT NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    stripe_customer_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_workspaces (
+    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    engram_id TEXT NOT NULL REFERENCES workspaces(engram_id) ON DELETE CASCADE,
+    role      TEXT NOT NULL DEFAULT 'owner',
+    PRIMARY KEY (user_id, engram_id)
 );
 """
 
@@ -437,6 +462,22 @@ async def _tool_commit(
     ttl_ts = datetime.fromtimestamp(time.time() + ttl_days * 86400, tz=timezone.utc) if ttl_days else None
     supersedes_id: str | None = None
 
+    # ── Quota check ──────────────────────────────────────────────────
+    async with pool.acquire() as conn:
+        ws_row = await conn.fetchrow(
+            "SELECT paused, storage_bytes, plan, stripe_customer_id FROM workspaces WHERE engram_id = $1",
+            workspace_id,
+        )
+    if ws_row and ws_row["paused"]:
+        return {
+            "status": "error",
+            "paused": True,
+            "message": (
+                "Workspace paused: free storage limit (512 MiB) exceeded. "
+                "Visit https://www.engram-us.com/dashboard to add a payment method and resume."
+            ),
+        }
+
     async with pool.acquire() as conn:
         if operation == "delete":
             await conn.execute(
@@ -475,6 +516,26 @@ async def _tool_commit(
                DO UPDATE SET last_seen = $2, total_commits = agents.total_commits + 1""",
             workspace_id, now,
         )
+        # Track storage usage
+        if operation != "delete":
+            content_bytes = len(content.encode())
+            await conn.execute(
+                "UPDATE workspaces SET storage_bytes = storage_bytes + $1 WHERE engram_id = $2",
+                content_bytes, workspace_id,
+            )
+            # Auto-pause if hobby limit exceeded and no payment method
+            updated_ws = await conn.fetchrow(
+                "SELECT storage_bytes, plan, stripe_customer_id FROM workspaces WHERE engram_id = $1",
+                workspace_id,
+            )
+            if (
+                updated_ws
+                and updated_ws["storage_bytes"] > HOBBY_LIMIT_BYTES
+                and not updated_ws["stripe_customer_id"]
+            ):
+                await conn.execute(
+                    "UPDATE workspaces SET paused = true WHERE engram_id = $1", workspace_id
+                )
 
     if durability == "durable" and operation != "delete":
         await _detect_conflicts(fact_id, content, scope, workspace_id, pool)
