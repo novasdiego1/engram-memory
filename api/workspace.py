@@ -1,0 +1,182 @@
+"""Workspace search API — returns facts and conflicts for the memory graph UI.
+
+POST /workspace/search
+  Body: {"engram_id": "ENG-XXXX-XXXX", "invite_key": "ek_live_..."}
+  Returns: {"facts": [...], "conflicts": [...], "agents": [...]}
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from typing import Any
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
+
+DB_URL = os.environ.get("ENGRAM_DB_URL", "")
+SCHEMA = "engram"
+
+_pool: Any = None
+_schema_ready = False
+
+
+async def _get_pool() -> Any:
+    global _pool, _schema_ready
+    if _pool is None:
+        import asyncpg
+
+        async def _set_path(c: Any) -> None:
+            await c.execute(f"SET search_path TO {SCHEMA}, public")
+
+        _pool = await asyncpg.create_pool(
+            DB_URL, min_size=1, max_size=3, command_timeout=30, init=_set_path
+        )
+    return _pool
+
+
+# ── Invite key auth (mirrored from api/mcp.py) ──────────────────────
+
+def _xor(data: bytes, enc_key: bytes, iv: bytes) -> bytes:
+    stream = bytearray()
+    counter = 0
+    while len(stream) < len(data):
+        block = hashlib.sha256(enc_key + iv + counter.to_bytes(4, "big")).digest()
+        stream.extend(block)
+        counter += 1
+    ks = bytes(stream[: len(data)])
+    return bytes(a ^ b for a, b in zip(data, ks))
+
+
+def _decode_invite_key(invite_key: str) -> dict[str, Any]:
+    if not invite_key.startswith("ek_live_"):
+        raise ValueError("Invalid invite key format")
+    b64 = invite_key[8:]
+    padding = 4 - len(b64) % 4
+    if padding != 4:
+        b64 += "=" * padding
+    token = base64.urlsafe_b64decode(b64)
+    if len(token) < 81:
+        raise ValueError("Invite key too short")
+    enc_key = token[:32]
+    iv = token[32:48]
+    mac = token[48:80]
+    ciphertext = token[80:]
+    expected = hmac.new(enc_key, iv + ciphertext, hashlib.sha256).digest()
+    if not hmac.compare_digest(expected, mac):
+        raise ValueError("Invite key authentication failed")
+    payload = json.loads(_xor(ciphertext, enc_key, iv))
+    if payload.get("expires_at", 0) < int(time.time()):
+        raise ValueError("Invite key has expired")
+    return payload
+
+
+def _invite_key_hash(invite_key: str) -> str:
+    b64 = invite_key[8:]
+    padding = 4 - len(b64) % 4
+    if padding != 4:
+        b64 += "=" * padding
+    token = base64.urlsafe_b64decode(b64)
+    return hashlib.sha256(token[:32]).hexdigest()
+
+
+async def _validate_key(invite_key: str, engram_id: str, pool: Any) -> bool:
+    try:
+        payload = _decode_invite_key(invite_key)
+        if payload["engram_id"] != engram_id:
+            return False
+        key_hash = _invite_key_hash(invite_key)
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT uses_remaining FROM invite_keys WHERE key_hash = $1 AND engram_id = $2",
+                key_hash, engram_id,
+            )
+        if not row:
+            return False
+        if row["uses_remaining"] is not None and row["uses_remaining"] <= 0:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+# ── Search handler ───────────────────────────────────────────────────
+
+async def handle_search(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    engram_id = body.get("engram_id", "").strip()
+    invite_key = body.get("invite_key", "").strip()
+
+    if not engram_id or not invite_key:
+        return JSONResponse({"error": "engram_id and invite_key are required"}, status_code=400)
+
+    pool = await _get_pool()
+    if not await _validate_key(invite_key, engram_id, pool):
+        return JSONResponse({"error": "Invalid invite key or workspace ID"}, status_code=401)
+
+    async with pool.acquire() as conn:
+        fact_rows = await conn.fetch(
+            """SELECT id, lineage_id, content, scope, confidence, fact_type,
+                      committed_at, valid_until, memory_op, supersedes_fact_id, durability
+               FROM facts
+               WHERE workspace_id = $1
+               ORDER BY committed_at DESC
+               LIMIT 500""",
+            engram_id,
+        )
+        conflict_rows = await conn.fetch(
+            """SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
+               FROM conflicts
+               WHERE workspace_id = $1
+               ORDER BY detected_at DESC
+               LIMIT 200""",
+            engram_id,
+        )
+        agent_rows = await conn.fetch(
+            """SELECT agent_id, engineer, label, last_seen, total_commits
+               FROM agents WHERE workspace_id = $1""",
+            engram_id,
+        )
+
+    def _ser(v: Any) -> Any:
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return v
+
+    facts = [{k: _ser(v) for k, v in dict(r).items()} for r in fact_rows]
+    conflicts = [{k: _ser(v) for k, v in dict(r).items()} for r in conflict_rows]
+    agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
+
+    return JSONResponse(
+        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+async def handle_options(request: Request) -> Response:
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        }
+    )
+
+
+app = Starlette(
+    routes=[
+        Route("/workspace/search", handle_search, methods=["POST"]),
+        Route("/workspace/search", handle_options, methods=["OPTIONS"]),
+        Route("/workspace/{path:path}", handle_search, methods=["POST"]),
+    ]
+)

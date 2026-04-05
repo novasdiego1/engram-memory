@@ -1,14 +1,29 @@
 {
   "framework": null,
-  "installCommand": "pip install starlette",
+  "installCommand": "pip install starlette asyncpg mcp pydantic uvicorn",
   "buildCommand": "",
   "outputDirectory": ".",
   "functions": {
     "api/index.py": {
       "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+    },
+    "api/mcp.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}",
+      "maxDuration": 60
+    },
+    "api/workspace.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+    },
+    "api/install.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
     }
   },
   "rewrites": [
+    { "source": "/mcp", "destination": "/api/mcp" },
+    { "source": "/mcp/(.*)", "destination": "/api/mcp" },
+    { "source": "/workspace", "destination": "/api/workspace" },
+    { "source": "/workspace/(.*)", "destination": "/api/workspace" },
+    { "source": "/install", "destination": "/api/install" },
     { "source": "/(.*)", "destination": "/api/index" }
   ]
 }
