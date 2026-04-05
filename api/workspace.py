@@ -120,33 +120,40 @@ async def handle_search(request: Request) -> JSONResponse:
     if not engram_id or not invite_key:
         return JSONResponse({"error": "engram_id and invite_key are required"}, status_code=400)
 
-    pool = await _get_pool()
+    try:
+        pool = await _get_pool()
+    except Exception as exc:
+        return JSONResponse({"error": f"Database connection failed: {exc}"}, status_code=500)
+
     if not await _validate_key(invite_key, engram_id, pool):
         return JSONResponse({"error": "Invalid invite key or workspace ID"}, status_code=401)
 
-    async with pool.acquire() as conn:
-        fact_rows = await conn.fetch(
-            """SELECT id, lineage_id, content, scope, confidence, fact_type,
-                      committed_at, valid_until, memory_op, supersedes_fact_id, durability
-               FROM facts
-               WHERE workspace_id = $1
-               ORDER BY committed_at DESC
-               LIMIT 500""",
-            engram_id,
-        )
-        conflict_rows = await conn.fetch(
-            """SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
-               FROM conflicts
-               WHERE workspace_id = $1
-               ORDER BY detected_at DESC
-               LIMIT 200""",
-            engram_id,
-        )
-        agent_rows = await conn.fetch(
-            """SELECT agent_id, engineer, label, last_seen, total_commits
-               FROM agents WHERE workspace_id = $1""",
-            engram_id,
-        )
+    try:
+        async with pool.acquire() as conn:
+            fact_rows = await conn.fetch(
+                """SELECT id, lineage_id, content, scope, confidence, fact_type,
+                          committed_at, valid_until, memory_op, supersedes_fact_id, durability
+                   FROM facts
+                   WHERE workspace_id = $1
+                   ORDER BY committed_at DESC
+                   LIMIT 500""",
+                engram_id,
+            )
+            conflict_rows = await conn.fetch(
+                """SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
+                   FROM conflicts
+                   WHERE workspace_id = $1
+                   ORDER BY detected_at DESC
+                   LIMIT 200""",
+                engram_id,
+            )
+            agent_rows = await conn.fetch(
+                """SELECT agent_id, engineer, label, last_seen, total_commits
+                   FROM agents WHERE workspace_id = $1""",
+                engram_id,
+            )
+    except Exception as exc:
+        return JSONResponse({"error": f"Query failed: {exc}"}, status_code=500)
 
     def _ser(v: Any) -> Any:
         if hasattr(v, "isoformat"):
