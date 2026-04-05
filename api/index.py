@@ -18,210 +18,419 @@ def _render_landing() -> str:
   <meta name="description" content="Shared memory for your team's agents. Works with any MCP-compatible IDE. Zero setup. All data encrypted, never shared, always yours.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg-primary: #050a0e;
+      --bg-secondary: #0a1118;
+      --bg-card: rgba(13, 23, 33, 0.7);
+      --bg-card-hover: rgba(16, 28, 40, 0.8);
+      --border-subtle: rgba(52, 211, 153, 0.08);
+      --border-glow: rgba(52, 211, 153, 0.2);
+      --emerald-50: #ecfdf5;
+      --emerald-100: #d1fae5;
+      --emerald-200: #a7f3d0;
+      --emerald-300: #6ee7b7;
+      --emerald-400: #34d399;
+      --emerald-500: #10b981;
+      --emerald-600: #059669;
+      --emerald-700: #047857;
+      --emerald-800: #065f46;
+      --emerald-900: #064e3b;
+      --text-primary: #f0fdf4;
+      --text-secondary: rgba(209, 250, 229, 0.6);
+      --text-muted: rgba(167, 243, 208, 0.35);
+    }
+
+    html { scroll-behavior: smooth; }
 
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       line-height: 1.6;
-      color: #0f172a;
-      background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #dcfce7 100%);
+      color: var(--text-primary);
+      background: var(--bg-primary);
       min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+    .container { max-width: 900px; margin: 0 auto; padding: 0 28px; }
 
-    /* Header */
+    /* ── Animated background ─────────────────────────────────── */
+    #neural-bg {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 0; pointer-events: none;
+    }
+    .bg-glow {
+      position: fixed; border-radius: 50%; filter: blur(120px); opacity: 0.12;
+      pointer-events: none; z-index: 0;
+    }
+    .bg-glow-1 { width: 600px; height: 600px; background: var(--emerald-600); top: -200px; left: -100px; }
+    .bg-glow-2 { width: 500px; height: 500px; background: #0891b2; bottom: -150px; right: -100px; }
+    .bg-glow-3 { width: 400px; height: 400px; background: var(--emerald-500); top: 50%; left: 50%; transform: translate(-50%, -50%); opacity: 0.06; }
+
+    /* ── Header ──────────────────────────────────────────────── */
     header {
-      padding: 24px 0;
-      background: rgba(255,255,255,0.8);
-      backdrop-filter: blur(10px);
-      border-bottom: 1px solid rgba(5,150,105,0.1);
-      position: sticky;
-      top: 0;
-      z-index: 100;
+      padding: 20px 0;
+      background: rgba(5, 10, 14, 0.6);
+      backdrop-filter: blur(20px) saturate(1.5);
+      border-bottom: 1px solid var(--border-subtle);
+      position: sticky; top: 0; z-index: 100;
     }
     .header-content { display: flex; justify-content: space-between; align-items: center; }
-    .logo { font-size: 28px; font-weight: 700; color: #059669; text-decoration: none; letter-spacing: -0.02em; }
-    .nav-links a { color: #059669; text-decoration: none; font-size: 15px; font-weight: 500; transition: opacity 0.2s; }
-    .nav-links a:hover { opacity: 0.7; }
-
-    /* Hero */
-    .hero { padding: 80px 0 60px; text-align: center; }
-    h1 { font-size: 48px; font-weight: 700; line-height: 1.2; margin-bottom: 20px; color: #064e3b; letter-spacing: -0.03em; }
-    .subtitle { font-size: 18px; color: #047857; max-width: 600px; margin: 0 auto 40px; line-height: 1.6; }
-
-    /* Cards */
-    .card {
-      background: white;
-      border-radius: 16px;
-      padding: 40px;
-      margin-bottom: 32px;
-      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
-      border: 1px solid rgba(5,150,105,0.1);
+    .logo {
+      font-size: 24px; font-weight: 700; color: var(--emerald-400);
+      text-decoration: none; letter-spacing: -0.03em;
+      display: flex; align-items: center; gap: 10px;
     }
-    .section-title { font-size: 28px; font-weight: 700; margin-bottom: 24px; color: #064e3b; text-align: center; }
+    .logo-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--emerald-400);
+      box-shadow: 0 0 12px var(--emerald-400), 0 0 24px rgba(52, 211, 153, 0.3);
+      animation: pulse-dot 3s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 12px var(--emerald-400), 0 0 24px rgba(52, 211, 153, 0.3); }
+      50% { opacity: 0.6; box-shadow: 0 0 6px var(--emerald-400), 0 0 12px rgba(52, 211, 153, 0.15); }
+    }
+    .nav-links { display: flex; gap: 28px; align-items: center; }
+    .nav-links a {
+      color: var(--text-secondary); text-decoration: none;
+      font-size: 14px; font-weight: 500; letter-spacing: 0.01em;
+      transition: color 0.25s;
+    }
+    .nav-links a:hover { color: var(--emerald-400); }
 
-    /* Code blocks */
+    /* ── Hero ────────────────────────────────────────────────── */
+    .hero {
+      padding: 120px 0 100px; text-align: center;
+      position: relative; z-index: 1;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 16px 6px 10px;
+      background: rgba(52, 211, 153, 0.08);
+      border: 1px solid rgba(52, 211, 153, 0.15);
+      border-radius: 100px; font-size: 13px; font-weight: 500;
+      color: var(--emerald-300); margin-bottom: 32px;
+      letter-spacing: 0.02em;
+    }
+    .hero-badge-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--emerald-400);
+      box-shadow: 0 0 8px var(--emerald-400);
+    }
+    h1 {
+      font-size: 64px; font-weight: 800; line-height: 1.08;
+      letter-spacing: -0.04em; margin-bottom: 24px;
+      background: linear-gradient(135deg, var(--emerald-100) 0%, var(--emerald-400) 50%, #6ee7b7 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle {
+      font-size: 19px; color: var(--text-secondary);
+      max-width: 560px; margin: 0 auto 48px;
+      line-height: 1.7; font-weight: 400;
+    }
+    .hero-cta {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 14px 32px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--emerald-600), var(--emerald-700));
+      color: white; font-size: 15px; font-weight: 600;
+      text-decoration: none; border: none; cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.3s;
+      box-shadow: 0 4px 24px rgba(5, 150, 105, 0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .hero-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 40px rgba(5, 150, 105, 0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .hero-cta svg { opacity: 0.7; }
+
+    /* ── Sections ────────────────────────────────────────────── */
+    .section { position: relative; z-index: 1; padding: 40px 0; }
+
+    /* ── Cards ───────────────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      border-radius: 20px;
+      padding: 48px;
+      margin-bottom: 40px;
+      border: 1px solid var(--border-subtle);
+      transition: border-color 0.4s, box-shadow 0.4s;
+    }
+    .card:hover {
+      border-color: var(--border-glow);
+      box-shadow: 0 0 60px rgba(52, 211, 153, 0.04);
+    }
+    .section-label {
+      font-size: 12px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--emerald-500);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 32px; font-weight: 700; margin-bottom: 16px;
+      color: var(--text-primary); letter-spacing: -0.02em;
+      text-align: left;
+    }
+    .section-desc {
+      font-size: 16px; color: var(--text-secondary);
+      line-height: 1.7; margin-bottom: 36px; max-width: 600px;
+    }
+
+    /* ── Install steps ───────────────────────────────────────── */
+    .install-steps { display: flex; flex-direction: column; gap: 28px; }
+    .install-step {
+      display: flex; gap: 20px; align-items: flex-start;
+    }
+    .step-num {
+      width: 32px; height: 32px; border-radius: 10px;
+      background: rgba(52, 211, 153, 0.1);
+      border: 1px solid rgba(52, 211, 153, 0.2);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; color: var(--emerald-400);
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .step-content { flex: 1; }
+    .step-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
+
+    /* ── Code blocks ─────────────────────────────────────────── */
     .code-block {
-      background: #064e3b; color: #d1fae5;
-      padding: 20px; border-radius: 12px;
-      font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
-      font-size: 15px; margin-bottom: 16px;
-      position: relative; border: 2px solid #059669;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(52, 211, 153, 0.12);
+      padding: 16px 20px; border-radius: 12px;
+      font-family: 'JetBrains Mono', 'SF Mono', monospace;
+      font-size: 14px; color: var(--emerald-300);
+      position: relative; overflow-x: auto;
     }
     .copy-btn {
-      position: absolute; top: 12px; right: 12px;
-      background: #059669; color: white; border: none;
-      padding: 6px 14px; border-radius: 6px;
-      cursor: pointer; font-size: 12px; font-weight: 600;
-      transition: background 0.2s, transform 0.15s;
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(52, 211, 153, 0.1);
+      border: 1px solid rgba(52, 211, 153, 0.2);
+      color: var(--emerald-400); padding: 5px 12px;
+      border-radius: 6px; cursor: pointer;
+      font-size: 11px; font-weight: 600; font-family: 'Inter', sans-serif;
+      letter-spacing: 0.03em;
+      transition: background 0.2s, border-color 0.2s;
     }
-    .copy-btn:hover { background: #047857; }
-    .copy-btn:active { transform: scale(0.95); }
-    .platform-tabs { display: flex; gap: 0; margin-bottom: 0; }
+    .copy-btn:hover { background: rgba(52, 211, 153, 0.2); border-color: rgba(52, 211, 153, 0.35); }
+
+    /* ── Platform tabs ───────────────────────────────────────── */
+    .platform-tabs { display: flex; gap: 2px; margin-bottom: 2px; }
     .tab {
-      padding: 10px 20px; border: none; background: #e2e8f0; color: #475569;
-      font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
-      transition: background 0.2s, color 0.2s;
+      padding: 8px 18px; border: none;
+      background: rgba(255,255,255,0.04);
+      color: var(--text-muted);
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      font-family: inherit; transition: all 0.25s;
+      border-radius: 8px 8px 0 0;
     }
-    .tab:first-child { border-radius: 8px 0 0 0; }
-    .tab:last-child { border-radius: 0 8px 0 0; }
-    .tab.active { background: #064e3b; color: #d1fae5; }
-    .tab:not(.active):hover { background: #cbd5e1; }
+    .tab.active { background: rgba(0, 0, 0, 0.4); color: var(--emerald-400); }
+    .tab:not(.active):hover { color: var(--text-secondary); background: rgba(255,255,255,0.06); }
     .platform-tabs + .code-block,
-    .platform-tabs ~ .code-block { border-radius: 0 12px 12px 12px; margin-top: 0; }
-    .step { font-size: 15px; color: #047857; margin-bottom: 12px; font-weight: 500; }
-    .note { font-size: 14px; color: #047857; line-height: 1.6; text-align: center; margin-top: 20px; }
+    .platform-tabs ~ .code-block { border-radius: 0 12px 12px 12px; }
 
-    /* What happens */
-    .card p { font-size: 16px; color: #1e293b; line-height: 1.7; margin-bottom: 16px; }
-    .card p:last-child { margin-bottom: 0; }
-    .card strong { color: #059669; font-weight: 600; }
-
-    /* Privacy grid */
-    .privacy-grid { display: grid; gap: 20px; margin-top: 20px; }
-    .privacy-item {
-      display: flex; gap: 16px; align-items: flex-start;
-      padding: 16px; background: #f0fdf4; border-radius: 10px;
+    .ide-note {
+      font-size: 13px; color: var(--text-muted); margin-top: 24px;
+      text-align: center; line-height: 1.6;
     }
-    .privacy-icon { font-size: 24px; flex-shrink: 0; margin-top: 2px; }
-    .privacy-item strong { color: #064e3b; font-size: 15px; }
-    .privacy-item p { font-size: 14px; color: #1e293b; line-height: 1.5; margin: 4px 0 0; }
+    .ide-note span { color: var(--text-secondary); }
 
-    /* Tools grid */
-    .tools-grid { display: grid; gap: 12px; margin-top: 24px; }
-    .tool-item { padding: 16px; background: #f0fdf4; border-radius: 10px; border-left: 4px solid #059669; }
-    .tool-item code { font-family: 'SF Mono', monospace; font-size: 14px; color: #059669; font-weight: 600; }
-    .tool-item p { font-size: 14px; color: #1e293b; line-height: 1.5; margin-top: 6px; margin-bottom: 0; }
+    /* ── Feature grid ────────────────────────────────────────── */
+    .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .feature-item {
+      padding: 28px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .feature-item:hover { border-color: var(--border-glow); background: rgba(255,255,255,0.035); }
+    .feature-icon {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: rgba(52, 211, 153, 0.08);
+      border: 1px solid rgba(52, 211, 153, 0.12);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 16px;
+    }
+    .feature-item h3 { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px; }
+    .feature-item p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
 
-    /* Memory graph search */
-    .search-form { display: flex; flex-direction: column; gap: 16px; }
+    /* ── Privacy section ─────────────────────────────────────── */
+    .privacy-grid { display: grid; gap: 1px; background: var(--border-subtle); border-radius: 16px; overflow: hidden; }
+    .privacy-item {
+      display: flex; gap: 20px; align-items: flex-start;
+      padding: 24px 28px;
+      background: var(--bg-secondary);
+      transition: background 0.3s;
+    }
+    .privacy-item:hover { background: rgba(16, 28, 40, 0.9); }
+    .privacy-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: rgba(52, 211, 153, 0.06);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+    .privacy-item h3 { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+    .privacy-item p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; }
+
+    /* ── Tools ────────────────────────────────────────────────── */
+    .tools-grid { display: grid; gap: 12px; }
+    .tool-item {
+      display: flex; align-items: center; gap: 20px;
+      padding: 20px 24px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      transition: border-color 0.3s;
+    }
+    .tool-item:hover { border-color: var(--border-glow); }
+    .tool-item code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px; font-weight: 500; color: var(--emerald-400);
+      background: rgba(52, 211, 153, 0.08);
+      padding: 4px 10px; border-radius: 6px;
+      white-space: nowrap;
+    }
+    .tool-item p { font-size: 14px; color: var(--text-secondary); margin: 0; }
+
+    /* ── Graph search ────────────────────────────────────────── */
+    .search-form { display: flex; flex-direction: column; gap: 12px; }
     .search-row { display: flex; gap: 12px; }
     .search-input {
-      flex: 1; padding: 12px 16px;
-      border: 2px solid rgba(5,150,105,0.2); border-radius: 10px;
-      font-size: 15px; font-family: inherit;
-      background: #f0fdf4; color: #064e3b;
-      transition: border-color 0.2s;
+      flex: 1; padding: 14px 18px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      font-size: 14px; font-family: inherit;
+      color: var(--text-primary);
+      transition: border-color 0.25s, box-shadow 0.25s;
     }
-    .search-input:focus { outline: none; border-color: #059669; background: white; }
-    .search-input::placeholder { color: #6ee7b7; }
+    .search-input:focus {
+      outline: none; border-color: var(--emerald-500);
+      box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.1);
+    }
+    .search-input::placeholder { color: var(--text-muted); }
     .search-btn {
-      padding: 12px 28px; background: #059669; color: white;
-      border: none; border-radius: 10px; font-size: 15px; font-weight: 600;
-      cursor: pointer; white-space: nowrap; transition: background 0.2s;
+      padding: 14px 28px;
+      background: linear-gradient(135deg, var(--emerald-600), var(--emerald-700));
+      color: white; border: none; border-radius: 12px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: transform 0.2s, box-shadow 0.3s;
+      box-shadow: 0 2px 16px rgba(5, 150, 105, 0.25);
     }
-    .search-btn:hover { background: #047857; }
-    .search-btn:disabled { background: #a7f3d0; cursor: not-allowed; }
+    .search-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 24px rgba(5, 150, 105, 0.35); }
+    .search-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
-    /* Graph container */
     #graph-section { display: none; }
-    #graph-error { display: none; color: #dc2626; font-size: 14px; font-weight: 500; text-align: center; padding: 12px; }
-    #graph-loading { display: none; text-align: center; padding: 20px; color: #047857; font-weight: 500; }
+    #graph-error { display: none; color: #f87171; font-size: 14px; font-weight: 500; text-align: center; padding: 16px; }
+    #graph-loading { display: none; text-align: center; padding: 24px; color: var(--emerald-400); font-weight: 500; }
 
     #cy {
       width: 100%; height: 520px;
-      border-radius: 12px; border: 2px solid rgba(5,150,105,0.15);
-      background: #f8fffe;
+      border-radius: 16px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(0, 0, 0, 0.25);
     }
-
-    .graph-stats {
-      display: flex; gap: 24px; justify-content: center;
-      margin-top: 16px; flex-wrap: wrap;
-    }
+    .graph-stats { display: flex; gap: 32px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
     .stat { text-align: center; }
-    .stat-num { font-size: 28px; font-weight: 700; color: #059669; }
-    .stat-label { font-size: 13px; color: #047857; font-weight: 500; }
+    .stat-num { font-size: 32px; font-weight: 700; color: var(--emerald-400); }
+    .stat-label { font-size: 12px; color: var(--text-muted); font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 2px; }
 
-    .graph-legend {
-      display: flex; gap: 20px; justify-content: center;
-      margin-top: 16px; flex-wrap: wrap;
-    }
-    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #1e293b; }
-    .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .graph-legend { display: flex; gap: 24px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
     .fact-detail {
-      display: none; margin-top: 16px; padding: 16px;
-      background: #f0fdf4; border-radius: 10px;
-      border-left: 4px solid #059669;
+      display: none; margin-top: 20px; padding: 20px;
+      background: rgba(0,0,0,0.3); border-radius: 14px;
+      border-left: 3px solid var(--emerald-500);
     }
-    .fact-detail h4 { font-size: 14px; font-weight: 600; color: #064e3b; margin-bottom: 8px; }
-    .fact-detail p { font-size: 14px; color: #1e293b; margin: 0; line-height: 1.5; }
-    .fact-meta { font-size: 12px; color: #047857; margin-top: 8px; }
+    .fact-detail h4 { font-size: 13px; font-weight: 600; color: var(--emerald-400); margin-bottom: 8px; }
+    .fact-detail p { font-size: 14px; color: var(--text-secondary); margin: 0; line-height: 1.6; }
+    .fact-meta { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
 
-    /* Search within graph */
     .graph-search-row { display: flex; gap: 8px; margin-top: 16px; }
     .graph-search-input {
-      flex: 1; padding: 8px 12px;
-      border: 1px solid rgba(5,150,105,0.3); border-radius: 8px;
-      font-size: 14px; font-family: inherit; background: white;
+      flex: 1; padding: 10px 14px;
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      font-size: 13px; font-family: inherit; color: var(--text-primary);
     }
-    .graph-search-input:focus { outline: none; border-color: #059669; }
+    .graph-search-input:focus { outline: none; border-color: var(--emerald-500); }
+    .graph-search-input::placeholder { color: var(--text-muted); }
 
-    /* Footer */
-    footer { padding: 40px 0; text-align: center; }
-    .footer-links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; }
-    .footer-links a { color: #059669; text-decoration: none; font-size: 14px; font-weight: 500; }
-    .footer-links a:hover { opacity: 0.7; }
-    .footer-tagline { font-size: 13px; color: #047857; font-style: italic; }
+    /* ── Scroll animations ───────────────────────────────────── */
+    .reveal {
+      opacity: 0; transform: translateY(30px);
+      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
 
-    /* Toast */
+    /* ── Footer ──────────────────────────────────────────────── */
+    footer {
+      padding: 60px 0 40px; text-align: center;
+      position: relative; z-index: 1;
+      border-top: 1px solid var(--border-subtle);
+    }
+    .footer-links { display: flex; gap: 28px; justify-content: center; align-items: center; margin-bottom: 16px; }
+    .footer-logo { font-size: 18px; font-weight: 700; color: var(--emerald-400); letter-spacing: -0.02em; }
+    .footer-links a { color: var(--text-muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: color 0.25s; }
+    .footer-links a:hover { color: var(--emerald-400); }
+    .footer-tagline { font-size: 13px; color: var(--text-muted); font-style: italic; }
+
+    /* ── Toast ────────────────────────────────────────────────── */
     .copy-toast {
       position: fixed; bottom: 32px; left: 50%;
       transform: translateX(-50%) translateY(20px);
-      background: #064e3b; color: #d1fae5;
-      padding: 12px 24px; border-radius: 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-glow);
+      color: var(--emerald-300);
+      padding: 12px 24px; border-radius: 12px;
       font-size: 14px; font-weight: 500;
       display: flex; align-items: center; gap: 8px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
       opacity: 0; pointer-events: none;
       transition: opacity 0.3s ease, transform 0.3s ease;
       z-index: 1000;
     }
     .copy-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+    /* ── Responsive ──────────────────────────────────────────── */
     @media (max-width: 768px) {
-      h1 { font-size: 32px; }
+      h1 { font-size: 38px; }
       .subtitle { font-size: 16px; }
-      .hero { padding: 60px 0 40px; }
-      .card { padding: 28px 20px; }
-      .section-title { font-size: 22px; }
+      .hero { padding: 80px 0 60px; }
+      .card { padding: 32px 24px; }
+      .section-title { font-size: 24px; }
+      .feature-grid { grid-template-columns: 1fr; }
       .search-row { flex-direction: column; }
       #cy { height: 380px; }
+      .platform-tabs { flex-wrap: wrap; }
+      .install-step { flex-direction: column; gap: 12px; }
     }
   </style>
 </head>
 <body>
 
+<canvas id="neural-bg"></canvas>
+<div class="bg-glow bg-glow-1"></div>
+<div class="bg-glow bg-glow-2"></div>
+<div class="bg-glow bg-glow-3"></div>
+
 <header>
   <div class="container">
     <div class="header-content">
-      <a href="/" class="logo">engram</a>
+      <a href="/" class="logo"><span class="logo-dot"></span>engram</a>
       <nav class="nav-links">
-        <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub →</a>
+        <a href="#install">Install</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
       </nav>
     </div>
   </div>
@@ -229,68 +438,112 @@ def _render_landing() -> str:
 
 <section class="hero">
   <div class="container">
-    <h1>Shared memory for your team's agents</h1>
+    <div class="hero-badge"><span class="hero-badge-dot"></span>MCP-compatible · Open source</div>
+    <h1>Shared memory for<br>your team's agents</h1>
     <p class="subtitle">
-      Works with any MCP-compatible IDE. Zero setup — one command and you're in.
-      Your data is encrypted, never shared, and always yours.
+      One agent discovers something. Every other agent knows it instantly.
+      Encrypted, private, and never shared. One command to install.
     </p>
+    <a href="#install" class="hero-cta">
+      Get started
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10m0 0L9 4m4 4L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
   </div>
 </section>
 
 <div class="container">
 
+  <!-- What it does -->
+  <div class="card reveal">
+    <div class="feature-grid">
+      <div class="feature-item">
+        <div class="feature-icon">💡</div>
+        <h3>Commit discoveries</h3>
+        <p>When an agent finds a hidden side effect, a failed approach, or an undocumented constraint — it commits that fact to shared memory.</p>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🔍</div>
+        <h3>Query before working</h3>
+        <p>Every agent queries team memory before starting work. No duplicated effort, no rediscovering what someone already found.</p>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">⚡</div>
+        <h3>Detect contradictions</h3>
+        <p>When two agents develop incompatible beliefs, Engram detects the contradiction and surfaces it for review.</p>
+      </div>
+      <div class="feature-item">
+        <div class="feature-icon">🧠</div>
+        <h3>Forget on purpose</h3>
+        <p>Ephemeral facts auto-expire unless proven useful. Old context stops crowding out what matters now.</p>
+      </div>
+    </div>
+  </div>
+
   <!-- Install -->
-  <div class="card">
-    <h2 class="section-title">Get Started</h2>
-    <div class="step">1. Run the installer</div>
-    <div class="platform-tabs">
-      <button class="tab active" onclick="switchTab('mac')">macOS / Linux</button>
-      <button class="tab" onclick="switchTab('ps')">Windows PowerShell</button>
-      <button class="tab" onclick="switchTab('cmd')">Windows CMD</button>
+  <div class="card reveal" id="install">
+    <div class="section-label">Get started</div>
+    <div class="section-title">One command. Zero config.</div>
+    <div class="section-desc">Install Engram, restart your IDE, and ask your agent to set up your team. That's it.</div>
+
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Run the installer</div>
+          <div class="platform-tabs">
+            <button class="tab active" onclick="switchTab('mac')">macOS / Linux</button>
+            <button class="tab" onclick="switchTab('ps')">PowerShell</button>
+            <button class="tab" onclick="switchTab('cmd')">CMD</button>
+          </div>
+          <div class="code-block" id="tab-mac">
+            <button class="copy-btn" onclick="copyCode('install-mac')">Copy</button>
+            <div id="install-mac">curl -fsSL https://engram.app/install | sh</div>
+          </div>
+          <div class="code-block" id="tab-ps" style="display:none;">
+            <button class="copy-btn" onclick="copyCode('install-ps')">Copy</button>
+            <div id="install-ps">irm https://engram.app/install.ps1 | iex</div>
+          </div>
+          <div class="code-block" id="tab-cmd" style="display:none;">
+            <button class="copy-btn" onclick="copyCode('install-cmd')">Copy</button>
+            <div id="install-cmd">curl -fsSL https://engram.app/install.cmd -o install.cmd &amp;&amp; install.cmd &amp;&amp; del install.cmd</div>
+          </div>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Restart your IDE</div>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Ask your agent</div>
+          <div class="code-block">
+            <button class="copy-btn" onclick="copyCode('setup-prompt')">Copy</button>
+            <div id="setup-prompt">"Set up Engram for my team"</div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="code-block" id="tab-mac">
-      <button class="copy-btn" onclick="copyCode('install-mac')">Copy</button>
-      <div id="install-mac">curl -fsSL https://engram.app/install | sh</div>
-    </div>
-    <div class="code-block" id="tab-ps" style="display:none;">
-      <button class="copy-btn" onclick="copyCode('install-ps')">Copy</button>
-      <div id="install-ps">irm https://engram.app/install.ps1 | iex</div>
-    </div>
-    <div class="code-block" id="tab-cmd" style="display:none;">
-      <button class="copy-btn" onclick="copyCode('install-cmd')">Copy</button>
-      <div id="install-cmd">curl -fsSL https://engram.app/install.cmd -o install.cmd && install.cmd && del install.cmd</div>
-    </div>
-    <div class="step">2. Restart your IDE</div>
-    <div class="step">3. Ask your agent</div>
-    <div class="code-block">
-      <button class="copy-btn" onclick="copyCode('setup-prompt')">Copy</button>
-      <div id="setup-prompt">"Set up Engram for my team"</div>
-    </div>
-    <p class="note">
-      Supports Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, and any MCP-compatible IDE
+    <p class="ide-note">
+      <span>Claude Code · Claude Desktop · Cursor · Windsurf · VS Code</span><br>
+      and any MCP-compatible IDE
     </p>
   </div>
 
-  <!-- Memory graph search -->
-  <div class="card">
-    <h2 class="section-title">View Your Memory Graph</h2>
-    <p style="text-align:center; color:#047857; margin-bottom:24px; font-size:15px;">
-      Search your workspace to see what your agents know — facts, conflicts, and lineage chains.
-    </p>
+  <!-- Memory graph -->
+  <div class="card reveal">
+    <div class="section-label">Dashboard</div>
+    <div class="section-title">View your memory graph</div>
+    <div class="section-desc">Search your workspace to see what your agents know — facts, conflicts, and lineage chains.</div>
+
     <div class="search-form">
       <div class="search-row">
-        <input
-          class="search-input" id="engram-id-input"
-          placeholder="Workspace ID  (ENG-XXXX-XXXX)"
-          autocomplete="off" spellcheck="false"
-        />
+        <input class="search-input" id="engram-id-input" placeholder="Workspace ID  (ENG-XXXX-XXXX)" autocomplete="off" spellcheck="false" />
       </div>
       <div class="search-row">
-        <input
-          class="search-input" id="invite-key-input"
-          placeholder="Invite key  (ek_live_...)"
-          autocomplete="off" spellcheck="false" type="password"
-        />
+        <input class="search-input" id="invite-key-input" placeholder="Invite key  (ek_live_...)" autocomplete="off" spellcheck="false" type="password" />
         <button class="search-btn" id="search-btn" onclick="loadGraph()">View Graph</button>
       </div>
     </div>
@@ -300,8 +553,8 @@ def _render_landing() -> str:
     <div id="graph-section">
       <div class="graph-stats" id="graph-stats"></div>
       <div class="graph-legend" id="graph-legend">
-        <span class="legend-item"><span class="legend-dot" style="background:#059669"></span>Active fact</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#94a3b8"></span>Retired fact</span>
+        <span class="legend-item"><span class="legend-dot" style="background:var(--emerald-500)"></span>Active fact</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#64748b"></span>Retired fact</span>
         <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Conflict</span>
       </div>
       <div class="graph-search-row">
@@ -316,56 +569,57 @@ def _render_landing() -> str:
     </div>
   </div>
 
-  <!-- What it does -->
-  <div class="card">
-    <h2 class="section-title">What It Does</h2>
-    <p>
-      When one agent discovers something important — a hidden side effect, a failed approach,
-      an undocumented constraint — it commits that fact. Every other agent on your team
-      queries it instantly before starting work.
-    </p>
-    <p>
-      When two agents develop incompatible beliefs, Engram detects the contradiction
-      and surfaces it for review.
-    </p>
-    <p>
-      <strong>Your data is private.</strong> All data is encrypted in transit and at rest,
-      isolated by workspace, and never read, analyzed, or redistributed.
-      We don't train on your data. We don't sell it. We have no analytics pipeline
-      that touches your content. Privacy isn't a feature — it's the foundation.
-    </p>
-  </div>
-
   <!-- Privacy -->
-  <div class="card">
-    <h2 class="section-title">Privacy Is the Foundation</h2>
+  <div class="card reveal" id="privacy">
+    <div class="section-label">Privacy</div>
+    <div class="section-title">Your data is yours. Period.</div>
+    <div class="section-desc">Privacy isn't a feature we added. It's the foundation everything is built on.</div>
+
     <div class="privacy-grid">
       <div class="privacy-item">
         <div class="privacy-icon">🔒</div>
-        <div><strong>Encrypted</strong><p>All data encrypted in transit (TLS) and at rest. Invite keys use encrypted payloads — teammates never see raw credentials.</p></div>
+        <div>
+          <h3>Encrypted everywhere</h3>
+          <p>All data encrypted in transit and at rest. Invite keys use encrypted payloads — teammates never see raw credentials.</p>
+        </div>
       </div>
       <div class="privacy-item">
         <div class="privacy-icon">🔐</div>
-        <div><strong>Isolated</strong><p>Every workspace is fully isolated. No cross-workspace access, no shared tables, no data leakage between teams.</p></div>
+        <div>
+          <h3>Fully isolated</h3>
+          <p>Every workspace is completely isolated. No cross-workspace access, no shared tables, no data leakage between teams.</p>
+        </div>
       </div>
       <div class="privacy-item">
         <div class="privacy-icon">🚫</div>
-        <div><strong>Never read</strong><p>We don't read your facts. We don't analyze your memory. We don't train on your data. We don't sell it. No analytics pipeline touches your content.</p></div>
+        <div>
+          <h3>Never read, never analyzed</h3>
+          <p>We don't read your facts. We don't analyze your memory. We don't train on your data. We don't sell it. No analytics pipeline touches your content.</p>
+        </div>
       </div>
       <div class="privacy-item">
         <div class="privacy-icon">🛡️</div>
-        <div><strong>Never redistributed</strong><p>Your team's knowledge never leaves your workspace. Never shared with other users, teams, or third parties. Not now, not ever.</p></div>
+        <div>
+          <h3>Never redistributed</h3>
+          <p>Your team's knowledge never leaves your workspace. Never shared with other users, teams, or third parties. Not now, not ever.</p>
+        </div>
       </div>
       <div class="privacy-item">
         <div class="privacy-icon">⚙️</div>
-        <div><strong>You control it</strong><p>Delete your workspace and everything is gone. Anonymous mode strips names. Anonymous agents randomize IDs. You decide what's visible.</p></div>
+        <div>
+          <h3>You control everything</h3>
+          <p>Delete your workspace and everything is gone. Anonymous mode strips names. Anonymous agents randomize IDs. You decide what's visible.</p>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Tools -->
-  <div class="card">
-    <h2 class="section-title">MCP Tools</h2>
+  <div class="card reveal">
+    <div class="section-label">MCP Tools</div>
+    <div class="section-title">Four tools. That's it.</div>
+    <div class="section-desc">Your agents use these automatically. No configuration needed.</div>
+
     <div class="tools-grid">
       <div class="tool-item"><code>engram_commit</code><p>Persist a verified discovery to shared memory</p></div>
       <div class="tool-item"><code>engram_query</code><p>Pull what your team's agents already know</p></div>
@@ -379,7 +633,7 @@ def _render_landing() -> str:
 <footer>
   <div class="container">
     <div class="footer-links">
-      <span style="font-weight:600;color:#064e3b;">engram</span>
+      <span class="footer-logo">engram</span>
       <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
       <a href="https://github.com/Agentscreator/Engram/blob/main/LICENSE" target="_blank">Apache 2.0</a>
     </div>
@@ -396,6 +650,85 @@ def _render_landing() -> str:
 </div>
 
 <script>
+// ── Neural network background ──────────────────────────────────────
+(function() {
+  const canvas = document.getElementById('neural-bg');
+  const ctx = canvas.getContext('2d');
+  let w, h, nodes = [], mouse = { x: -1000, y: -1000 };
+
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const NODE_COUNT = Math.min(60, Math.floor(window.innerWidth / 25));
+  for (let i = 0; i < NODE_COUNT; i++) {
+    nodes.push({
+      x: Math.random() * w, y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 1.5 + 0.5,
+    });
+  }
+
+  document.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+    nodes.forEach(n => {
+      n.x += n.vx; n.y += n.vy;
+      if (n.x < 0 || n.x > w) n.vx *= -1;
+      if (n.y < 0 || n.y > h) n.vy *= -1;
+    });
+    // Edges
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 180) {
+          const alpha = (1 - dist / 180) * 0.08;
+          ctx.beginPath();
+          ctx.moveTo(nodes[i].x, nodes[i].y);
+          ctx.lineTo(nodes[j].x, nodes[j].y);
+          ctx.strokeStyle = `rgba(52, 211, 153, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+        }
+      }
+      // Mouse interaction
+      const mdx = nodes[i].x - mouse.x;
+      const mdy = nodes[i].y - mouse.y;
+      const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+      if (mdist < 200) {
+        const alpha = (1 - mdist / 200) * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(nodes[i].x, nodes[i].y);
+        ctx.lineTo(mouse.x, mouse.y);
+        ctx.strokeStyle = `rgba(52, 211, 153, ${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+    // Nodes
+    nodes.forEach(n => {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(52, 211, 153, 0.25)';
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// ── Scroll reveal ──────────────────────────────────────────────────
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.08 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
 // ── Platform tab switcher ──────────────────────────────────────────
 function switchTab(platform) {
   ['mac','ps','cmd'].forEach(p => {
@@ -405,8 +738,6 @@ function switchTab(platform) {
     btn.classList.toggle('active', btn.getAttribute('onclick').includes("'" + platform + "'"));
   });
 }
-
-// Auto-detect platform
 (function() {
   const ua = navigator.userAgent || navigator.platform || '';
   if (/Win/i.test(ua)) switchTab('ps');
@@ -431,7 +762,6 @@ function copyCode(id) {
 let cy = null;
 let allElements = null;
 
-// ── Load graph data ────────────────────────────────────────────────
 async function loadGraph() {
   const engramId  = document.getElementById('engram-id-input').value.trim();
   const inviteKey = document.getElementById('invite-key-input').value.trim();
@@ -452,13 +782,11 @@ async function loadGraph() {
       body: JSON.stringify({ engram_id: engramId, invite_key: inviteKey }),
     });
     const data = await resp.json();
-
     if (!resp.ok) {
       errEl.textContent = data.error || 'Authentication failed. Check your workspace ID and invite key.';
       errEl.style.display = 'block';
       return;
     }
-
     renderGraph(data);
     secEl.style.display = 'block';
   } catch (e) {
@@ -470,46 +798,39 @@ async function loadGraph() {
   }
 }
 
-// ── Build Cytoscape elements ───────────────────────────────────────
 function renderGraph(data) {
   const { facts, conflicts, agents } = data;
-
-  // Stats
   const active = facts.filter(f => !f.valid_until).length;
   const retired = facts.filter(f => f.valid_until).length;
   const open = conflicts.filter(c => c.status === 'open').length;
   document.getElementById('graph-stats').innerHTML = `
     <div class="stat"><div class="stat-num">${active}</div><div class="stat-label">Active facts</div></div>
-    <div class="stat"><div class="stat-num">${retired}</div><div class="stat-label">Retired facts</div></div>
-    <div class="stat"><div class="stat-num">${open}</div><div class="stat-label">Open conflicts</div></div>
+    <div class="stat"><div class="stat-num">${retired}</div><div class="stat-label">Retired</div></div>
+    <div class="stat"><div class="stat-num">${open}</div><div class="stat-label">Conflicts</div></div>
     <div class="stat"><div class="stat-num">${(agents||[]).length}</div><div class="stat-label">Agents</div></div>
   `;
 
   const elements = [];
-
-  // Group by scope for label
   const scopeColors = {};
-  const PALETTE = ['#059669','#0891b2','#7c3aed','#db2777','#d97706','#16a34a','#2563eb'];
+  const PALETTE = ['#10b981','#06b6d4','#8b5cf6','#ec4899','#f59e0b','#22c55e','#3b82f6'];
   let palIdx = 0;
   const scopeColor = (scope) => {
     if (!scopeColors[scope]) scopeColors[scope] = PALETTE[palIdx++ % PALETTE.length];
     return scopeColors[scope];
   };
 
-  // Fact nodes
   facts.forEach(f => {
-    const retired = !!f.valid_until;
+    const ret = !!f.valid_until;
     elements.push({ data: {
       id: f.id, label: f.scope || 'general',
       content: f.content, scope: f.scope,
       fact_type: f.fact_type, committed_at: f.committed_at,
-      durability: f.durability, retired,
-      color: retired ? '#94a3b8' : scopeColor(f.scope || 'general'),
-      size: retired ? 20 : (f.confidence || 0.9) * 36 + 12,
+      durability: f.durability, retired: ret,
+      color: ret ? '#64748b' : scopeColor(f.scope || 'general'),
+      size: ret ? 18 : (f.confidence || 0.9) * 36 + 12,
     }});
   });
 
-  // Lineage edges (supersedes)
   facts.filter(f => f.supersedes_fact_id).forEach(f => {
     elements.push({ data: {
       id: `lin-${f.id}`, source: f.supersedes_fact_id, target: f.id,
@@ -517,7 +838,6 @@ function renderGraph(data) {
     }});
   });
 
-  // Conflict edges
   conflicts.forEach(c => {
     if (c.status === 'open') {
       elements.push({ data: {
@@ -529,122 +849,65 @@ function renderGraph(data) {
   });
 
   allElements = elements;
-
   if (cy) cy.destroy();
   cy = cytoscape({
     container: document.getElementById('cy'),
     elements,
     style: [
-      {
-        selector: 'node',
-        style: {
-          'background-color': 'data(color)',
-          'label': 'data(label)',
-          'font-size': '11px',
-          'color': '#1e293b',
-          'text-valign': 'bottom',
-          'text-margin-y': '4px',
-          'width': 'data(size)',
-          'height': 'data(size)',
-          'border-width': 2,
-          'border-color': '#fff',
-          'box-shadow': '0 2px 8px rgba(0,0,0,0.15)',
-        },
-      },
-      {
-        selector: 'node[retired = true]',
-        style: {
-          'opacity': 0.45,
-          'border-style': 'dashed',
-          'border-color': '#94a3b8',
-        },
-      },
-      {
-        selector: 'edge[kind = "lineage"]',
-        style: {
-          'line-color': '#059669',
-          'target-arrow-color': '#059669',
-          'target-arrow-shape': 'triangle',
-          'curve-style': 'bezier',
-          'width': 1.5,
-          'opacity': 0.5,
-        },
-      },
-      {
-        selector: 'edge[kind = "conflict"]',
-        style: {
-          'line-color': '#ef4444',
-          'line-style': 'dashed',
-          'width': 2.5,
-          'opacity': 0.8,
-          'curve-style': 'bezier',
-          'label': '⚡',
-          'font-size': '14px',
-          'text-rotation': 'autorotate',
-        },
-      },
-      {
-        selector: ':selected',
-        style: {
-          'border-color': '#064e3b',
-          'border-width': 3,
-        },
-      },
+      { selector: 'node', style: {
+        'background-color': 'data(color)', 'label': 'data(label)',
+        'font-size': '10px', 'color': '#94a3b8',
+        'text-valign': 'bottom', 'text-margin-y': '5px',
+        'width': 'data(size)', 'height': 'data(size)',
+        'border-width': 1.5, 'border-color': 'rgba(255,255,255,0.1)',
+      }},
+      { selector: 'node[retired = true]', style: { 'opacity': 0.35, 'border-style': 'dashed' }},
+      { selector: 'edge[kind = "lineage"]', style: {
+        'line-color': '#10b981', 'target-arrow-color': '#10b981',
+        'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
+        'width': 1, 'opacity': 0.4,
+      }},
+      { selector: 'edge[kind = "conflict"]', style: {
+        'line-color': '#ef4444', 'line-style': 'dashed',
+        'width': 2, 'opacity': 0.7, 'curve-style': 'bezier',
+        'label': '⚡', 'font-size': '12px', 'text-rotation': 'autorotate',
+      }},
+      { selector: ':selected', style: { 'border-color': '#34d399', 'border-width': 2.5 }},
     ],
     layout: {
       name: facts.length < 30 ? 'cose' : 'random',
-      animate: facts.length < 80,
-      randomize: false,
-      nodeRepulsion: 8000,
-      idealEdgeLength: 120,
-      padding: 24,
+      animate: facts.length < 80, randomize: false,
+      nodeRepulsion: 8000, idealEdgeLength: 120, padding: 24,
     },
   });
 
-  // Node click → show detail
   cy.on('tap', 'node', evt => {
     const d = evt.target.data();
-    const detail = document.getElementById('fact-detail');
     document.getElementById('detail-scope').textContent = `${d.scope || 'general'}  ·  ${d.fact_type || 'observation'}`;
     document.getElementById('detail-content').textContent = d.content || '';
     const ts = d.committed_at ? new Date(d.committed_at).toLocaleString() : '';
-    document.getElementById('detail-meta').textContent =
-      `${d.retired ? 'Retired' : 'Active'}  ·  ${d.durability || 'durable'}  ·  ${ts}`;
-    detail.style.display = 'block';
+    document.getElementById('detail-meta').textContent = `${d.retired ? 'Retired' : 'Active'}  ·  ${d.durability || 'durable'}  ·  ${ts}`;
+    document.getElementById('fact-detail').style.display = 'block';
   });
-
   cy.on('tap', evt => {
-    if (evt.target === cy) {
-      document.getElementById('fact-detail').style.display = 'none';
-    }
+    if (evt.target === cy) document.getElementById('fact-detail').style.display = 'none';
   });
 }
 
-// ── Filter graph ───────────────────────────────────────────────────
 function filterGraph(query) {
   if (!cy || !allElements) return;
   const q = query.toLowerCase();
-  if (!q) {
-    cy.elements().style('opacity', 1);
-    return;
-  }
+  if (!q) { cy.elements().style('opacity', 1); return; }
   cy.nodes().forEach(n => {
-    const matches =
-      (n.data('content') || '').toLowerCase().includes(q) ||
-      (n.data('scope') || '').toLowerCase().includes(q);
-    n.style('opacity', matches ? 1 : 0.1);
+    const matches = (n.data('content') || '').toLowerCase().includes(q) || (n.data('scope') || '').toLowerCase().includes(q);
+    n.style('opacity', matches ? 1 : 0.08);
   });
-  cy.edges().style('opacity', 0.05);
+  cy.edges().style('opacity', 0.03);
 }
 
-// Allow pressing Enter in the inputs
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('invite-key-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') loadGraph();
-  });
-  document.getElementById('engram-id-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') loadGraph();
-  });
+  document.getElementById('invite-key-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadGraph(); });
+  document.getElementById('engram-id-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadGraph(); });
 });
 </script>
 </body>
