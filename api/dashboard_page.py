@@ -605,9 +605,7 @@ def _render_dashboard() -> str:
 
     <!-- Billing -->
     <div class="tab-panel" id="panel-billing">
-      <div class="billing-section" id="billing-section">
-        <div class="empty-state">Loading billing info…</div>
-      </div>
+      <div class="billing-section" id="billing-section"></div>
     </div>
   </div>
 </div>
@@ -844,19 +842,6 @@ async function openWorkspace(engram_id, initialTab) {
   document.getElementById('detail-status-badge').textContent = isPaused ? 'Paused' : 'Active';
   document.getElementById('paused-banner').style.display = isPaused ? 'flex' : 'none';
 
-  // Load workspace data
-  try {
-    const r = await fetch('/workspace/search', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ engram_id, invite_key: '' }),
-    });
-    // workspace/search requires an invite key — use a direct approach via /auth/me data
-    // Since auth session covers workspace access, we need a separate endpoint or
-    // rely on the invite key the user already provided. For now fetch what we can.
-  } catch(e) {}
-
-  // Fetch via workspace search — user must have provided key at connect time
-  // We'll use the session to get workspace data via a dedicated endpoint
   await loadWorkspaceData(engram_id);
 
   if (initialTab) {
@@ -889,17 +874,31 @@ async function loadWorkspaceData(engram_id) {
 }
 
 function showInviteKeyPrompt(engram_id) {
-  document.getElementById('stats-row').innerHTML = `
-    <div style="padding:32px 0;color:var(--t2);font-size:14px;width:100%">
-      <div style="margin-bottom:16px;font-weight:600;color:var(--t1)">Enter your invite key to load workspace data</div>
-      <div style="display:flex;gap:10px;max-width:600px">
-        <input id="quick-key" placeholder="ek_live_…" type="password"
-          style="flex:1;padding:10px 14px;background:rgba(0,0,0,0.3);border:1px solid var(--border);
-          border-radius:10px;font-size:13px;font-family:inherit;color:var(--t1);" />
-        <button class="btn-sm btn-primary" onclick="loadWithKey('${esc(engram_id)}')">Load</button>
+  // Workspace not yet linked to this account — show a clear connect prompt
+  document.getElementById('stats-row').innerHTML = '';
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.remove('active');
+    p.innerHTML = '';
+  });
+  document.querySelector('.tabs').style.display = 'none';
+  document.getElementById('panel-graph').innerHTML = `
+    <div style="padding:64px 0;text-align:center;color:var(--t2)">
+      <div style="font-size:18px;font-weight:700;color:var(--t1);margin-bottom:10px">
+        Connect this workspace to your account
       </div>
-      <div id="quick-key-err" style="color:var(--red);font-size:13px;margin-top:8px;display:none"></div>
+      <div style="font-size:14px;max-width:420px;margin:0 auto 28px;line-height:1.7">
+        To view workspace memories, link it using your invite key.
+        You only need to do this once per workspace.
+      </div>
+      <div style="display:flex;gap:10px;max-width:500px;margin:0 auto">
+        <input id="quick-key" placeholder="ek_live_…" type="password"
+          style="flex:1;padding:12px 16px;background:rgba(0,0,0,0.3);border:1px solid var(--border);
+          border-radius:11px;font-size:14px;font-family:inherit;color:var(--t1);" />
+        <button class="btn-sm btn-primary" style="padding:12px 22px" onclick="loadWithKey('${esc(engram_id)}')">Connect</button>
+      </div>
+      <div id="quick-key-err" style="color:var(--red);font-size:13px;margin-top:12px;display:none"></div>
     </div>`;
+  document.getElementById('panel-graph').classList.add('active');
 }
 
 async function loadWithKey(engram_id) {
@@ -907,6 +906,22 @@ async function loadWithKey(engram_id) {
   const errEl = document.getElementById('quick-key-err');
   errEl.style.display = 'none';
   try {
+    // First link the workspace to the account via the connect endpoint
+    const linkR = await fetch('/auth/connect-workspace', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ engram_id, invite_key: key }),
+    });
+    if (!linkR.ok) {
+      // Fallback: key might already be linked — try direct search
+      const d = await linkR.json();
+      if (!d.error?.includes('already')) {
+        errEl.textContent = d.error || 'Invalid invite key';
+        errEl.style.display = 'block';
+        return;
+      }
+    }
+    // Now fetch via session (workspace is now linked)
     const r = await fetch('/workspace/search', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ engram_id, invite_key: key }),
@@ -914,6 +929,44 @@ async function loadWithKey(engram_id) {
     const d = await r.json();
     if (!r.ok) { errEl.textContent = d.error || 'Failed'; errEl.style.display = 'block'; return; }
     WS_DATA = d;
+    // Restore tabs and render
+    document.querySelector('.tabs').style.display = '';
+    document.querySelectorAll('.tab-panel').forEach((p,i) => {
+      p.innerHTML = '';
+      p.classList.remove('active');
+    });
+    // Rebuild panel content (was cleared by showInviteKeyPrompt)
+    document.getElementById('panel-graph').innerHTML = `
+      <div class="graph-controls">
+        <input class="graph-filter" id="graph-filter" placeholder="Filter by scope or content…" oninput="filterGraph(this.value)" />
+      </div>
+      <div id="cy"></div>
+      <div class="graph-legend">
+        <span class="legend-item"><span class="legend-dot" style="background:var(--em5)"></span>Active</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#64748b"></span>Retired</span>
+        <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Conflict</span>
+      </div>
+      <div class="node-detail" id="node-detail">
+        <h4 id="nd-scope"></h4><p id="nd-content"></p><div class="meta" id="nd-meta"></div>
+      </div>`;
+    document.getElementById('panel-conflicts').innerHTML = '<div class="conflict-list" id="conflict-list"></div>';
+    document.getElementById('panel-facts').innerHTML = `
+      <div class="facts-toolbar">
+        <input class="facts-search" id="facts-search" placeholder="Search facts…" oninput="filterFacts()" />
+        <button class="filter-btn active" onclick="setFactFilter('all', this)">All</button>
+        <button class="filter-btn" onclick="setFactFilter('active', this)">Active</button>
+        <button class="filter-btn" onclick="setFactFilter('retired', this)">Retired</button>
+      </div>
+      <div class="fact-table">
+        <div class="fact-row fact-row-header"><div>Content</div><div>Scope</div><div>Type</div><div>Date</div></div>
+        <div id="facts-list"></div>
+      </div>`;
+    document.getElementById('panel-agents').innerHTML = '<div class="agents-grid" id="agents-grid"></div>';
+    document.getElementById('panel-billing').innerHTML = '<div class="billing-section" id="billing-section"></div>';
+    document.getElementById('panel-graph').classList.add('active');
+    // Refresh session workspaces so the list shows the newly linked workspace
+    const meR = await fetch('/auth/me', { credentials: 'include' });
+    if (meR.ok) SESSION = await meR.json();
     renderDetail();
   } catch(e) {
     errEl.textContent = 'Connection error';

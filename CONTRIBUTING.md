@@ -2,9 +2,44 @@
 
 # Contributing to Engram
 
-*Thank you for being here. Engram is being built in the open, and early contributors shape what it becomes.*
+*This is built in the open. Early contributors shape what it becomes — and become part of it.*
 
 </div>
+
+---
+
+## Five-Minute Quick Start
+
+```bash
+# 1. Fork the repo on GitHub, then:
+git clone https://github.com/YOUR-USERNAME/Engram.git
+cd Engram
+
+# 2. Install
+./install.sh          # macOS / Linux
+# or: pip install -e ".[dev]"
+
+# 3. Run the MCP server locally
+python -m engram
+
+# 4. Ask your agent (Claude Code, Cursor, etc.) to set up Engram
+# Your agent will call engram_init and you'll see it working.
+
+# 5. Make a change → open a PR
+git checkout -b your-feature-or-fix
+```
+
+That's it. If any step fails, open an issue — a broken setup path is itself a valid first contribution.
+
+---
+
+## Good First Contributions
+
+Not sure where to start? These are always useful:
+- **Improve error messages** — vague errors are bugs
+- **Add test coverage** for an edge case you noticed
+- **Document a non-obvious behavior** in a code comment or the README
+- **Pick a roadmap item** from [README.md#roadmap](./README.md#roadmap) — comment on the issue before starting so we can align
 
 ---
 
