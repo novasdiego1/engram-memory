@@ -41,6 +41,8 @@ irm https://engram-us.com/install.ps1 | iex
 curl -fsSL https://engram-us.com/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
+By default, the installer writes `https://mcp.engram.app/mcp` into your MCP config. If your environment needs a different endpoint, set `ENGRAM_MCP_URL` before running the installer.
+
 Restart your editor, then ask your agent:
 ```
 "Set up Engram for my team"

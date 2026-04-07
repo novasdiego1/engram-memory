@@ -5,7 +5,7 @@
 
 set -e
 
-MCP_URL="https://www.engram-us.com/mcp"
+MCP_URL="${ENGRAM_MCP_URL:-https://mcp.engram.app/mcp}"
 INVITE_KEY=""
 
 # Parse --join flag

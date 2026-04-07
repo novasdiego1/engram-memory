@@ -4,7 +4,11 @@ REM Usage: curl -fsSL https://engram-us.com/install.cmd -o install.cmd && instal
 
 setlocal enabledelayedexpansion
 
-set "MCP_URL=https://www.engram-us.com/mcp"
+if defined ENGRAM_MCP_URL (
+    set "MCP_URL=%ENGRAM_MCP_URL%"
+) else (
+    set "MCP_URL=https://mcp.engram.app/mcp"
+)
 set "INVITE_KEY="
 
 REM ── Require Python 3 ─────────────────────────────────────────────

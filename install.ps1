@@ -3,16 +3,57 @@
 #   or:  & { $env:ENGRAM_JOIN='ek_live_...'; irm https://engram-us.com/install.ps1 | iex }
 
 $ErrorActionPreference = 'Stop'
-$McpUrl = 'https://www.engram-us.com/mcp'
+$McpUrl = $env:ENGRAM_MCP_URL
+if (-not $McpUrl) { $McpUrl = 'https://mcp.engram.app/mcp' }
 $InviteKey = $env:ENGRAM_JOIN
 
-# ── Require Python 3 ───────────────────────────────────────────────
-if (-not (Get-Command python3 -ErrorAction SilentlyContinue) -and
-    -not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Host 'Python 3 is required but not found. Please install it first.' -ForegroundColor Red
-    exit 1
+function Read-JsonOrEmpty {
+    param([string]$FilePath)
+
+    if (-not (Test-Path $FilePath)) {
+        return [pscustomobject]@{}
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $FilePath -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            return [pscustomobject]@{}
+        }
+        return $raw | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{}
+    }
 }
-$py = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { 'python' }
+
+function Ensure-ObjectProperty {
+    param(
+        [object]$Target,
+        [string]$Name,
+        [object]$Value
+    )
+
+    if ($null -eq $Target.PSObject.Properties[$Name]) {
+        $Target | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    } else {
+        $Target.$Name = $Value
+    }
+}
+
+function Write-JsonFile {
+    param(
+        [object]$Object,
+        [string]$FilePath
+    )
+
+    $directory = Split-Path -Parent $FilePath
+    if ($directory -and -not (Test-Path $directory)) {
+        New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    }
+
+    $json = $Object | ConvertTo-Json -Depth 20
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($FilePath, $json, $encoding)
+}
 
 # ── Ask for invite key if not provided ─────────────────────────────
 if (-not $InviteKey) {
@@ -26,32 +67,87 @@ if (-not $InviteKey) {
 
 function Patch-McpServersUrl {  # Cursor, Kiro, Trae, Amazon Q
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});e={'url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['mcpServers']) {
+        $c | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $e = [pscustomobject]@{ url = $McpUrl }
+    if ($InviteKey) {
+        Ensure-ObjectProperty -Target $e -Name 'headers' -Value ([pscustomobject]@{ Authorization = "Bearer $InviteKey" })
+    }
+    Ensure-ObjectProperty -Target $c.mcpServers -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 function Patch-Windsurf {  # serverUrl not url
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});e={'serverUrl':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['mcpServers']) {
+        $c | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $e = [pscustomobject]@{ serverUrl = $McpUrl }
+    if ($InviteKey) {
+        Ensure-ObjectProperty -Target $e -Name 'headers' -Value ([pscustomobject]@{ Authorization = "Bearer $InviteKey" })
+    }
+    Ensure-ObjectProperty -Target $c.mcpServers -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 function Patch-VSCode {  # {servers: {type: "http", url}}
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('servers',{});e={'type':'http','url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['servers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['servers']) {
+        $c | Add-Member -NotePropertyName 'servers' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $e = [pscustomobject]@{ type = 'http'; url = $McpUrl }
+    if ($InviteKey) {
+        Ensure-ObjectProperty -Target $e -Name 'headers' -Value ([pscustomobject]@{ Authorization = "Bearer $InviteKey" })
+    }
+    Ensure-ObjectProperty -Target $c.servers -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 function Patch-ClaudeCode {  # {type: "http", url} in ~/.claude.json
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};c.setdefault('mcpServers',{});e={'type':'http','url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['mcpServers']) {
+        $c | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $e = [pscustomobject]@{ type = 'http'; url = $McpUrl }
+    if ($InviteKey) {
+        Ensure-ObjectProperty -Target $e -Name 'headers' -Value ([pscustomobject]@{ Authorization = "Bearer $InviteKey" })
+    }
+    Ensure-ObjectProperty -Target $c.mcpServers -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 function Patch-ClaudeDesktop {  # npx mcp-remote bridge
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});a=['-y','mcp-remote@latest',u];k and a.extend(['--header','Authorization: Bearer '+k]);c['mcpServers']['engram']={'command':'npx','args':a};json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['mcpServers']) {
+        $c | Add-Member -NotePropertyName 'mcpServers' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $args = @('-y', 'mcp-remote@latest', $McpUrl)
+    if ($InviteKey) {
+        $args += @('--header', "Authorization: Bearer $InviteKey")
+    }
+    $e = [pscustomobject]@{ command = 'npx'; args = $args }
+    Ensure-ObjectProperty -Target $c.mcpServers -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 function Patch-OpenCode {  # {mcp: {engram: {type: "remote", url}}}
     param([string]$f)
-    & $py -c "import json,os;f=r'$f';u='$McpUrl';k='$InviteKey';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcp',{});e={'type':'remote','url':u,'enabled':True};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcp']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+    $c = Read-JsonOrEmpty $f
+    if ($null -eq $c.PSObject.Properties['mcp']) {
+        $c | Add-Member -NotePropertyName 'mcp' -NotePropertyValue ([pscustomobject]@{})
+    }
+    $e = [pscustomobject]@{ type = 'remote'; url = $McpUrl; enabled = $true }
+    if ($InviteKey) {
+        Ensure-ObjectProperty -Target $e -Name 'headers' -Value ([pscustomobject]@{ Authorization = "Bearer $InviteKey" })
+    }
+    Ensure-ObjectProperty -Target $c.mcp -Name 'engram' -Value $e
+    Write-JsonFile $c $f
 }
 
 # ── Detect and patch MCP clients ──────────────────────────────────
