@@ -622,5 +622,172 @@ def token_create(engineer: str, agent_id: str | None, expires_hours: int) -> Non
     click.echo(tok)
 
 
+# ── engram verify ────────────────────────────────────────────────────
+
+
+@main.command()
+@click.option("--verbose", "-v", is_flag=True, help="Show details for all checks.")
+def verify(verbose: bool) -> None:
+    """Verify Engram installation and configuration.
+    
+    Runs a focused checklist and prints a clear pass/fail for each:
+    ✓ workspace.json exists and is valid
+    ✓ Backend is reachable (team mode)
+    ✓ MCP config written to at least one IDE
+    ✓ NLI model files present (if using conflict detection)
+    """
+    from engram.workspace import WORKSPACE_PATH, read_workspace
+    import json
+    import urllib.request
+    import urllib.error
+    import os
+
+    all_passed = True
+    verbose = verbose or os.environ.get("ENGRAM_VERIFY_VERBOSE") == "1"
+
+    # Check 1: workspace.json exists and is valid JSON
+    click.echo("\n[1/4] Checking workspace configuration...")
+    if not WORKSPACE_PATH.exists():
+        click.echo(f"  ✗ ~/.engram/workspace.json not found")
+        click.echo(f"    → Run: engram init   (or: engram join <key>)")
+        click.echo(f"    → Docs: https://github.com/Agentscreator/Engram/blob/main/docs/QUICKSTART.md")
+        all_passed = False
+    else:
+        try:
+            data = json.loads(WORKSPACE_PATH.read_text())
+            ws = read_workspace()
+            mode = "team" if ws and ws.db_url else "local"
+            click.echo(f"  ✓ workspace.json exists ({mode} mode)")
+            if verbose:
+                click.echo(f"    - engram_id: {ws.engram_id if ws else 'N/A'}")
+                click.echo(f"    - schema: {ws.schema if ws else 'N/A'}")
+                click.echo(f"    - anonymous_mode: {ws.anonymous_mode if ws else 'N/A'}")
+        except json.JSONDecodeError as e:
+            click.echo(f"  ✗ workspace.json is invalid JSON: {e}")
+            click.echo(f"    → Delete and re-run: rm ~/.engram/workspace.json && engram init")
+            all_passed = False
+
+    # Check 2: Backend is reachable (team mode only)
+    click.echo("\n[2/4] Checking backend connectivity...")
+    ws = read_workspace()
+    if ws and ws.db_url:
+        # For team mode, check if we can reach the MCP endpoint
+        # The MCP URL pattern is derived from db_url or uses default
+        mcp_url = os.environ.get("ENGRAM_MCP_URL", "https://mcp.engram.app/mcp")
+        
+        # Try a simple HEAD request to check connectivity
+        try:
+            req = urllib.request.Request(
+                mcp_url.replace("/mcp", "/health") if "/mcp" in mcp_url else mcp_url,
+                method="HEAD"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status < 400:
+                    click.echo(f"  ✓ Backend reachable at {mcp_url}")
+                else:
+                    click.echo(f"  ✗ Backend returned status {resp.status}")
+                    all_passed = False
+        except urllib.error.URLError as e:
+            # Non-critical: backend might not have /health endpoint
+            click.echo(f"  ⚠ Could not reach health endpoint (non-critical)")
+            if verbose:
+                click.echo(f"    - URL: {mcp_url}")
+                click.echo(f"    - Error: {e.reason}")
+                click.echo(f"    - Note: Backend connectivity will be verified by your IDE")
+        except Exception as e:
+            click.echo(f"  ⚠ Could not verify backend ({type(e).__name__}: {e})")
+            if verbose:
+                click.echo(f"    - This is normal if you're offline or the backend is busy")
+    else:
+        click.echo("  ○ Team mode not configured (local SQLite mode)")
+        if verbose:
+            click.echo("    - For team features: engram init or engram join <key>")
+
+    # Check 3: MCP config in at least one IDE
+    click.echo("\n[3/4] Checking MCP configuration in IDEs...")
+    detected = []
+    missing = []
+    
+    for client_name, info in _MCP_CLIENTS.items():
+        config_path: Path = info["path"]
+        try:
+            if config_path.exists():
+                data = json.loads(config_path.read_text())
+                key = info["key"]
+                
+                # Navigate nested keys (e.g., "mcpServers" or "mcp")
+                keys = key.split(".")
+                current = data
+                found = True
+                for k in keys:
+                    if isinstance(current, dict) and k in current:
+                        current = current[k]
+                    else:
+                        found = False
+                        break
+                
+                if found and isinstance(current, dict) and "engram" in current:
+                    detected.append(client_name)
+                else:
+                    missing.append(client_name)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            missing.append(client_name)
+    
+    if detected:
+        click.echo(f"  ✓ Engram configured in: {', '.join(detected)}")
+        if verbose:
+            for client_name in detected:
+                click.echo(f"    - ✓ {client_name}")
+    else:
+        click.echo("  ✗ Engram not found in any IDE MCP config")
+        click.echo(f"    → Run: engram install")
+        all_passed = False
+
+    if missing and verbose:
+        click.echo(f"\n  Other detected IDEs (Engram not configured):")
+        for client_name in missing[:5]:  # Limit verbose output
+            click.echo(f"    - ○ {client_name}")
+        if len(missing) > 5:
+            click.echo(f"    - ... and {len(missing) - 5} more")
+
+    # Check 4: NLI model files present
+    click.echo("\n[4/4] Checking NLI model files...")
+    model_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    nli_model_path = model_dir / "models--cross-encoder--nli-MiniLM2-L6-H768"
+    
+    # Check in common locations
+    possible_paths = [
+        nli_model_path,
+        Path.home() / ".cache" / "sentence_transformers" / "cross-encoder" / "nli-MiniLM2-L6-H768",
+    ]
+    
+    found_model = False
+    for path in possible_paths:
+        if path.exists():
+            click.echo(f"  ✓ NLI model found at {path}")
+            found_model = True
+            break
+    
+    if not found_model:
+        click.echo(f"  ⚠ NLI model not cached (will download on first conflict detection)")
+        if verbose:
+            click.echo(f"    - Model: cross-encoder/nli-MiniLM2-L6-H768")
+            click.echo(f"    - Will be downloaded automatically when needed")
+            click.echo(f"    - This is optional - Engram works without it (Tier 1 detection disabled)")
+
+    # Summary
+    click.echo("\n" + "=" * 50)
+    if all_passed:
+        click.echo("✓ All checks passed! Engram is ready to use.")
+        click.echo("\nNext steps:")
+        click.echo("  1. Restart your IDE")
+        click.echo("  2. Ask your agent: 'Set up Engram for my team'")
+        click.echo("  3. Run 'engram verify' anytime to re-check")
+    else:
+        click.echo("✗ Some checks failed. Fix the issues above and run 'engram verify' again.")
+        click.echo("\nFor help: https://github.com/Agentscreator/Engram/blob/main/docs/TROUBLESHOOTING.md")
+    click.echo("=" * 50 + "\n")
+
+
 if __name__ == "__main__":
     main()
