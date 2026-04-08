@@ -104,8 +104,10 @@ def build_federation_routes(storage: Storage) -> Any:
         if not after:
             return JSONResponse({"error": "Missing 'after' parameter"}, status_code=400)
         scope = request.query_params.get("scope")
-        limit = int(request.query_params.get("limit", "1000"))
-        limit = min(limit, 5000)
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "1000")), 5000))
+        except (TypeError, ValueError):
+            limit = 1000
 
         facts = await storage.get_facts_since(after, scope_prefix=scope, limit=limit)
         # Strip binary embedding from response (too large for JSON)

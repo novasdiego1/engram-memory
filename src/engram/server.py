@@ -780,6 +780,77 @@ async def engram_resolve(
     )
 
 
+# ── engram_batch_commit ──────────────────────────────────────────────
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    }
+)
+async def engram_batch_commit(
+    facts: list[dict[str, Any]],
+    agent_id: str | None = None,
+    engineer: str | None = None,
+) -> dict[str, Any]:
+    """Commit multiple facts to shared team memory in a single call.
+
+    Use this to bootstrap knowledge from wikis, runbooks, ADRs, or any
+    structured source — rather than making dozens of individual engram_commit
+    calls.  Each fact goes through the same full pipeline as engram_commit
+    (dedup, secret scan, embedding, conflict detection), so no quality is
+    lost by batching.
+
+    A validation or secret-scan failure on one fact does NOT abort the batch.
+    Inspect the per-fact "status" in the results list to see what happened.
+
+    Parameters:
+    - facts: List of fact objects.  Each object may include:
+        - content (required): The claim in plain English.
+        - scope (required): Hierarchical topic path, e.g. "auth/jwt".
+        - confidence (required): 0.0–1.0.
+        - fact_type: "observation" | "inference" | "decision". Default: observation.
+        - agent_id: Overrides the top-level agent_id for this specific fact.
+        - engineer: Overrides the top-level engineer for this specific fact.
+        - provenance: Evidence trail (file path, test output, etc.).
+        - ttl_days: Optional TTL in days.
+        - operation: "add" | "update" | "delete" | "none". Default: add.
+        - durability: "durable" | "ephemeral". Default: durable.
+        - corrects_lineage: lineage_id to supersede (for update/delete ops).
+    - agent_id: Default agent_id applied to all facts that omit it.
+    - engineer: Default engineer applied to all facts that omit it.
+
+    Returns:
+    {
+      total: int,          # number of facts submitted
+      committed: int,      # successfully written (not duplicates)
+      duplicates: int,     # already existed — no-op
+      failed: int,         # validation or secret-scan errors
+      results: [           # per-fact outcome, preserving input order
+        {index, status: "ok"|"duplicate"|"error", fact_id?, error?}
+      ]
+    }
+
+    Limits: Maximum 100 facts per batch.
+    """
+    engine = get_engine()
+
+    # Key generation check
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+
+    return await engine.batch_commit(
+        facts=facts,
+        default_agent_id=agent_id,
+        default_engineer=engineer,
+    )
+
+
 # ── engram_promote ───────────────────────────────────────────────────
 
 
@@ -823,3 +894,161 @@ async def engram_promote(fact_id: str) -> dict[str, Any]:
     """
     engine = get_engine()
     return await engine.promote(fact_id=fact_id)
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    },
+)
+async def engram_feedback(
+    conflict_id: str,
+    feedback: str,
+) -> dict[str, Any]:
+    """Record human feedback on a conflict detection to improve accuracy.
+
+    Call this after reviewing a conflict to label it as a real contradiction
+    (true_positive) or a false alarm (false_positive). Feedback is aggregated
+    in workspace statistics and can be used to tune detection thresholds.
+
+    Parameters:
+    - conflict_id: The ID of the conflict to annotate.
+    - feedback: 'true_positive' (real conflict) or 'false_positive' (false alarm).
+
+    Returns: {recorded: true, conflict_id, feedback}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.record_feedback(conflict_id=conflict_id, feedback=feedback)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_timeline(
+    scope: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return the chronological fact history for audit and debugging.
+
+    Useful for understanding how shared knowledge in a scope has evolved over
+    time, reviewing what was committed and when, and spotting lineage chains.
+
+    Parameters:
+    - scope: Optional scope prefix to filter (e.g. 'auth', 'infra').
+    - limit: Max facts to return (1–200, default 50).
+
+    Returns: List of fact summaries ordered by valid_from ascending.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_timeline(scope=scope, limit=limit)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_agents() -> list[dict[str, Any]]:
+    """List all registered agents and their activity statistics.
+
+    Returns each agent's commit count, flagged count, engineer association,
+    and last-seen timestamp. Useful for auditing which agents are active
+    and identifying agents with high flag rates.
+
+    Returns: List of agent records ordered by last_seen descending.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_agents()
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_lineage(lineage_id: str) -> list[dict[str, Any]]:
+    """Return the full version history of a fact lineage.
+
+    Every time a fact is corrected or updated via corrects_lineage, a new
+    version is appended to the same lineage. This tool shows all versions
+    ordered newest-first so you can trace how a piece of knowledge evolved.
+
+    Parameters:
+    - lineage_id: The lineage UUID to look up (from any fact's lineage_id field).
+
+    Returns: List of fact dicts (newest first). Empty if lineage not found.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_lineage(lineage_id)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_expiring(days_ahead: int = 7) -> list[dict[str, Any]]:
+    """Return facts whose TTL will expire within the next N days.
+
+    Call this periodically to proactively refresh knowledge before it expires.
+    Facts listed here have a valid_until set and will become invisible to
+    normal queries once that timestamp passes.
+
+    Parameters:
+    - days_ahead: Look-ahead window in days (1–30, default 7).
+
+    Returns: List of expiring facts ordered by valid_until ascending (soonest first).
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_expiring_facts(days_ahead=days_ahead)
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    },
+)
+async def engram_bulk_dismiss(
+    conflict_ids: list[str],
+    reason: str,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Dismiss multiple open conflicts in one call.
+
+    Use after reviewing a batch of false-positive detections, or after a
+    large refactor that makes many existing conflicts obsolete. Each conflict
+    is dismissed individually — a failure on one does not abort the rest.
+
+    Parameters:
+    - conflict_ids: List of conflict IDs to dismiss (max 100).
+    - reason: Human-readable explanation recorded on each conflict.
+    - agent_id: Optional agent performing the dismissal (for audit trail).
+
+    Returns: {total, dismissed, failed, results: [{conflict_id, status, error?}]}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.bulk_dismiss(
+        conflict_ids=conflict_ids,
+        reason=reason,
+        dismissed_by=agent_id,
+    )

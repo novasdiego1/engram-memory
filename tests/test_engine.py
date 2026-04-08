@@ -157,7 +157,10 @@ async def test_detection_finds_numeric_conflict(engine: EngramEngine):
 
     conflicts = await engine.get_conflicts(scope="auth", status="open")
     assert len(conflicts) >= 1
-    assert any(c["detection_tier"] == "tier2_numeric" for c in conflicts)
+    # Same-scope numeric entity conflicts are caught by tier0_entity (exact entity
+    # name + different value in scope). tier2_numeric only fires when tier0 doesn't
+    # apply (e.g. entities present in candidate but missed by tier0 lookup).
+    assert any(c["detection_tier"] in ("tier0_entity", "tier2_numeric") for c in conflicts)
     assert any("rate_limit" in (c["explanation"] or "") for c in conflicts)
 
 
@@ -258,6 +261,124 @@ async def test_resolve_winner(engine: EngramEngine):
     # Losing fact should be superseded
     loser = await engine.storage.get_fact_by_id(r1["fact_id"])
     assert loser["valid_until"] is not None
+
+
+@pytest.mark.asyncio
+async def test_commit_rejects_nonexistent_corrects_lineage(engine: EngramEngine):
+    """Providing a corrects_lineage that doesn't exist must raise ValueError."""
+    with pytest.raises(ValueError, match="not found"):
+        await engine.commit(
+            content="Updated rate limit is 200 req/s",
+            scope="auth",
+            confidence=0.9,
+            agent_id="agent-1",
+            corrects_lineage="nonexistent-lineage-id-abc123",
+        )
+
+
+@pytest.mark.asyncio
+async def test_commit_corrects_lineage_valid(engine: EngramEngine):
+    """corrects_lineage pointing to a real lineage must succeed."""
+    r1 = await engine.commit(
+        content="Rate limit is 500 req/s",
+        scope="auth",
+        confidence=0.8,
+        agent_id="agent-1",
+    )
+    fact = await engine.storage.get_fact_by_id(r1["fact_id"])
+    lineage = fact["lineage_id"]
+
+    r2 = await engine.commit(
+        content="Rate limit is actually 1000 req/s",
+        scope="auth",
+        confidence=0.95,
+        agent_id="agent-2",
+        corrects_lineage=lineage,
+    )
+    assert r2["duplicate"] is False
+    old = await engine.storage.get_fact_by_id(r1["fact_id"])
+    assert old["valid_until"] is not None, "Old fact in lineage must be superseded"
+
+
+@pytest.mark.asyncio
+async def test_commit_ephemeral_durability(engine: EngramEngine):
+    """Ephemeral facts are stored with durability='ephemeral' and default TTL."""
+    result = await engine.commit(
+        content="Temporary debug flag is enabled",
+        scope="debug",
+        confidence=0.7,
+        agent_id="agent-1",
+        durability="ephemeral",
+    )
+    assert result["duplicate"] is False
+    fact = await engine.storage.get_fact_by_id(result["fact_id"])
+    assert fact["durability"] == "ephemeral"
+    assert fact["ttl_days"] == 1, "Ephemeral facts default to 1-day TTL"
+
+
+@pytest.mark.asyncio
+async def test_commit_ephemeral_not_returned_in_normal_query(engine: EngramEngine):
+    """Ephemeral facts must not appear in normal (durable-only) queries."""
+    await engine.commit(
+        content="Temporary flag is on",
+        scope="flags",
+        confidence=0.5,
+        agent_id="agent-1",
+        durability="ephemeral",
+    )
+    await engine.commit(
+        content="Production flag is stable",
+        scope="flags",
+        confidence=0.9,
+        agent_id="agent-1",
+        durability="durable",
+    )
+    results = await engine.query(topic="flag", scope="flags")
+    contents = [r["content"] for r in results]
+    assert "Production flag is stable" in contents
+    assert "Temporary flag is on" not in contents, "Ephemeral facts must not appear in durable queries"
+
+
+@pytest.mark.asyncio
+async def test_commit_delete_operation(engine: EngramEngine):
+    """operation='delete' must close the target lineage."""
+    r1 = await engine.commit(
+        content="Old config: max connections = 50",
+        scope="db",
+        confidence=0.9,
+        agent_id="agent-1",
+    )
+    fact = await engine.storage.get_fact_by_id(r1["fact_id"])
+    lineage = fact["lineage_id"]
+
+    result = await engine.commit(
+        content="Retiring stale connection limit fact",
+        scope="db",
+        confidence=0.9,
+        agent_id="agent-2",
+        operation="delete",
+        corrects_lineage=lineage,
+    )
+    assert result["memory_op"] == "delete"
+    assert result["deleted_lineage"] == lineage
+
+    # Original fact must be retired
+    retired = await engine.storage.get_fact_by_id(r1["fact_id"])
+    assert retired["valid_until"] is not None, "Deleted lineage must be closed"
+
+
+@pytest.mark.asyncio
+async def test_commit_rejects_whitespace_content(engine: EngramEngine):
+    """All-whitespace content must be rejected."""
+    with pytest.raises(ValueError, match="empty"):
+        await engine.commit(content="   ", scope="test", confidence=0.5)
+
+
+@pytest.mark.asyncio
+async def test_commit_rejects_whitespace_scope(engine: EngramEngine):
+    """All-whitespace scope must be rejected."""
+    with pytest.raises(ValueError, match="empty"):
+        await engine.commit(content="valid content", scope="  ", confidence=0.5)
 
 
 @pytest.mark.asyncio

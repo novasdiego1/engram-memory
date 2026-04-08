@@ -210,6 +210,18 @@ class EngramEngine:
 
         # Step 9: Determine lineage_id and handle update/auto-update
         supersedes_fact_id: str | None = None
+
+        # Validate user-supplied corrects_lineage before using it.
+        # If the lineage doesn't exist the caller made an error — fail loudly
+        # rather than silently creating an orphaned lineage with no history.
+        if corrects_lineage:
+            existing_in_lineage = await self.storage.get_facts_by_lineage(corrects_lineage)
+            if not existing_in_lineage:
+                raise ValueError(
+                    f"corrects_lineage '{corrects_lineage}' not found. "
+                    "Cannot update a lineage that does not exist in this workspace."
+                )
+
         if operation == "update" and not corrects_lineage:
             # Auto-updater: find the most semantically similar active fact in scope
             # and supersede it (MemFactory's semantic Updater pattern)
@@ -667,6 +679,251 @@ class EngramEngine:
             "resolution_type": resolution_type,
         }
 
+    # ── engram_batch_commit ──────────────────────────────────────────
+
+    async def batch_commit(
+        self,
+        facts: list[dict],
+        default_agent_id: str | None = None,
+        default_engineer: str | None = None,
+    ) -> dict:
+        """Commit multiple facts in one call.
+
+        Each fact is committed through the full pipeline (dedup, secret scan,
+        embedding, entity extraction, async detection).  Facts are processed
+        sequentially; a validation error on one fact does not abort the rest.
+
+        Args:
+            facts: List of fact dicts.  Each may contain: content, scope,
+                confidence, fact_type, agent_id, engineer, provenance,
+                ttl_days, operation, durability, corrects_lineage.
+            default_agent_id: Fallback agent_id for facts that omit it.
+            default_engineer: Fallback engineer for facts that omit it.
+
+        Returns:
+            {total, committed, duplicates, failed,
+             results: [{index, status, fact_id?, duplicate?, error?}]}
+        """
+        if not facts:
+            raise ValueError("facts list cannot be empty.")
+        if len(facts) > 100:
+            raise ValueError("Batch size cannot exceed 100 facts.")
+
+        results: list[dict] = []
+        committed = 0
+        duplicates = 0
+        failed = 0
+
+        for i, item in enumerate(facts):
+            if not isinstance(item, dict):
+                results.append({"index": i, "status": "error", "error": "Each fact must be a JSON object."})
+                failed += 1
+                continue
+
+            try:
+                result = await self.commit(
+                    content=item.get("content", ""),
+                    scope=item.get("scope", "general"),
+                    confidence=float(item.get("confidence", 0.8)),
+                    agent_id=item.get("agent_id") or default_agent_id,
+                    engineer=item.get("engineer") or default_engineer,
+                    corrects_lineage=item.get("corrects_lineage"),
+                    provenance=item.get("provenance"),
+                    fact_type=item.get("fact_type", "observation"),
+                    ttl_days=item.get("ttl_days"),
+                    operation=item.get("operation", "add"),
+                    durability=item.get("durability", "durable"),
+                )
+                is_dup = result.get("duplicate", False)
+                if is_dup:
+                    duplicates += 1
+                else:
+                    committed += 1
+                results.append({
+                    "index": i,
+                    "status": "duplicate" if is_dup else "ok",
+                    "fact_id": result.get("fact_id"),
+                    "duplicate": is_dup,
+                })
+            except Exception as exc:
+                failed += 1
+                results.append({"index": i, "status": "error", "error": str(exc)})
+
+        return {
+            "total": len(facts),
+            "committed": committed,
+            "duplicates": duplicates,
+            "failed": failed,
+            "results": results,
+        }
+
+    # ── engram_stats ─────────────────────────────────────────────────
+
+    async def get_stats(self) -> dict:
+        """Return aggregate workspace statistics.
+
+        Delegates to the storage layer for efficient SQL aggregation.
+        """
+        return await self.storage.get_workspace_stats()
+
+    # ── engram_feedback ───────────────────────────────────────────────
+
+    async def record_feedback(self, conflict_id: str, feedback: str) -> dict:
+        """Record human or agent feedback on a conflict detection.
+
+        Args:
+            conflict_id: The conflict to annotate.
+            feedback: 'true_positive' (real conflict) or 'false_positive' (false alarm).
+
+        Returns:
+            {recorded: True, conflict_id, feedback}
+        """
+        if feedback not in ("true_positive", "false_positive"):
+            raise ValueError("feedback must be 'true_positive' or 'false_positive'.")
+        conflict = await self.storage.get_conflict_by_id(conflict_id)
+        if not conflict:
+            raise ValueError(f"Conflict '{conflict_id}' not found.")
+        await self.storage.insert_detection_feedback(conflict_id, feedback)
+        return {"recorded": True, "conflict_id": conflict_id, "feedback": feedback}
+
+    # ── engram_timeline ───────────────────────────────────────────────
+
+    async def get_timeline(
+        self, scope: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        """Return facts ordered by valid_from for audit/timeline view.
+
+        Args:
+            scope: Optional scope prefix to filter by.
+            limit: Maximum number of facts to return (capped at 200).
+
+        Returns:
+            List of fact summaries ordered chronologically.
+        """
+        limit = max(1, min(limit, 200))
+        return await self.storage.get_fact_timeline(scope=scope, limit=limit)
+
+    # ── engram_agents ─────────────────────────────────────────────────
+
+    async def get_agents(self) -> list[dict]:
+        """Return all registered agents and their commit/flag stats."""
+        return await self.storage.get_agents()
+
+    # ── fact lookup / listing ─────────────────────────────────────────
+
+    async def get_fact(self, fact_id: str) -> dict | None:
+        """Fetch a single fact by ID. Returns None if not found."""
+        return await self.storage.get_fact_by_id(fact_id)
+
+    async def list_facts(
+        self,
+        scope: str | None = None,
+        fact_type: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """List current (non-retired) durable facts, optionally filtered.
+
+        Args:
+            scope: Optional scope prefix to filter by.
+            fact_type: Optional fact type filter ('observation', 'inference', 'decision').
+            limit: Maximum results (capped at 200).
+
+        Returns:
+            List of fact dicts ordered by committed_at descending.
+        """
+        limit = max(1, min(limit, 200))
+        return await self.storage.get_current_facts_in_scope(
+            scope=scope, fact_type=fact_type, limit=limit
+        )
+
+    # ── lineage ───────────────────────────────────────────────────────
+
+    async def get_lineage(self, lineage_id: str) -> list[dict]:
+        """Return the full version history of a fact lineage.
+
+        All facts sharing a lineage_id represent successive versions of the
+        same piece of knowledge. The list is ordered newest-first so the
+        current (valid_until IS NULL) fact is always first.
+
+        Args:
+            lineage_id: The lineage UUID to look up.
+
+        Returns:
+            List of fact dicts. Empty list if lineage_id not found.
+        """
+        return await self.storage.get_facts_by_lineage(lineage_id)
+
+    # ── expiring facts ────────────────────────────────────────────────
+
+    async def get_expiring_facts(self, days_ahead: int = 7) -> list[dict]:
+        """Return facts whose TTL will expire within days_ahead days.
+
+        Args:
+            days_ahead: Look-ahead window in days (1–30, default 7).
+
+        Returns:
+            List of facts ordered by valid_until ascending (soonest first).
+        """
+        days_ahead = max(1, min(days_ahead, 30))
+        return await self.storage.get_expiring_facts(days_ahead=days_ahead)
+
+    # ── bulk conflict dismiss ─────────────────────────────────────────
+
+    async def bulk_dismiss(
+        self,
+        conflict_ids: list[str],
+        reason: str,
+        dismissed_by: str | None = None,
+    ) -> dict:
+        """Dismiss multiple open conflicts in one call.
+
+        Useful for clearing noise from detection (e.g. false positives flagged
+        by feedback, or old conflicts after a major refactor). Each conflict
+        is dismissed individually; a failure on one does not abort the rest.
+
+        Args:
+            conflict_ids: List of conflict IDs to dismiss (max 100).
+            reason: Human-readable reason recorded on each conflict.
+            dismissed_by: Agent or user performing the dismissal.
+
+        Returns:
+            {total, dismissed, failed, results: [{conflict_id, status, error?}]}
+        """
+        if not conflict_ids:
+            raise ValueError("conflict_ids cannot be empty.")
+        if len(conflict_ids) > 100:
+            raise ValueError("Cannot dismiss more than 100 conflicts at once.")
+
+        results = []
+        dismissed = 0
+        failed = 0
+
+        for cid in conflict_ids:
+            try:
+                ok = await self.storage.resolve_conflict(
+                    conflict_id=cid,
+                    resolution_type="dismissed",
+                    resolution=reason,
+                    resolved_by=dismissed_by or "api",
+                )
+                if ok:
+                    dismissed += 1
+                    results.append({"conflict_id": cid, "status": "dismissed"})
+                else:
+                    failed += 1
+                    results.append({"conflict_id": cid, "status": "skipped",
+                                    "error": "not found or already resolved"})
+            except Exception as exc:
+                failed += 1
+                results.append({"conflict_id": cid, "status": "error", "error": str(exc)})
+
+        return {
+            "total": len(conflict_ids),
+            "dismissed": dismissed,
+            "failed": failed,
+            "results": results,
+        }
+
     # ── Detection Worker (Phase 3) ───────────────────────────────────
 
     async def _detection_worker(self) -> None:
@@ -733,6 +990,11 @@ class EngramEngine:
         entities = json.loads(fact.get("entities") or "[]")
         now = datetime.now(timezone.utc).isoformat()
 
+        # Pre-fetch all fact IDs that already have a conflict with fact_id.
+        # This single query replaces the per-candidate conflict_exists() calls
+        # in Tier 0, Tier 2b, and Tier 2, avoiding N+1 query patterns.
+        existing_conflict_ids = await self.storage.get_conflicting_fact_ids(fact_id)
+
         # ── Tier 0: Entity exact-match conflicts ─────────────────────
         tier0_flagged: set[str] = set()
         for entity in entities:
@@ -746,8 +1008,7 @@ class EngramEngine:
                 )
                 for c in conflicts:
                     if c["id"] not in tier0_flagged:
-                        already = await self.storage.conflict_exists(fact_id, c["id"])
-                        if not already:
+                        if c["id"] not in existing_conflict_ids:
                             conflict_id = uuid.uuid4().hex
                             await self.storage.insert_conflict({
                                 "id": conflict_id,
@@ -783,8 +1044,7 @@ class EngramEngine:
                     if c["id"] not in tier0_flagged and c["id"] not in tier2b_flagged:
                         if c["scope"] == fact["scope"]:
                             continue  # Already handled by Tier 0
-                        already = await self.storage.conflict_exists(fact_id, c["id"])
-                        if not already:
+                        if c["id"] not in existing_conflict_ids:
                             conflict_id = uuid.uuid4().hex
                             await self.storage.insert_conflict({
                                 "id": conflict_id,
@@ -825,8 +1085,7 @@ class EngramEngine:
                         continue
                     if e_new["name"] == e_cand["name"] and str(e_new["value"]) != str(e_cand["value"]):
                         if candidate["id"] not in tier2_flagged:
-                            already = await self.storage.conflict_exists(fact_id, candidate["id"])
-                            if not already:
+                            if candidate["id"] not in existing_conflict_ids:
                                 conflict_id = uuid.uuid4().hex
                                 await self.storage.insert_conflict({
                                     "id": conflict_id,
@@ -972,8 +1231,11 @@ class EngramEngine:
         if conflict.get("suggested_resolution"):
             return  # Already has a suggestion
 
-        fact_a = await self.storage.get_fact_by_id(conflict["fact_a_id"])
-        fact_b = await self.storage.get_fact_by_id(conflict["fact_b_id"])
+        facts_by_id = await self.storage.get_facts_by_ids(
+            [conflict["fact_a_id"], conflict["fact_b_id"]]
+        )
+        fact_a = facts_by_id.get(conflict["fact_a_id"])
+        fact_b = facts_by_id.get(conflict["fact_b_id"])
         if not fact_a or not fact_b:
             return
 
@@ -990,24 +1252,45 @@ class EngramEngine:
             try:
                 await asyncio.sleep(3600)  # check every hour
                 stale = await self.storage.get_stale_open_conflicts(older_than_hours=72)
-                for conflict in stale:
-                    try:
-                        await self._escalate_conflict(conflict)
-                    except Exception:
-                        logger.exception("Escalation error for conflict %s", conflict["id"])
+                if stale:
+                    # Batch-fetch all referenced facts in one query instead of
+                    # two get_fact_by_id() calls per conflict (N+1 avoidance).
+                    all_ids = list(
+                        {c["fact_a_id"] for c in stale} | {c["fact_b_id"] for c in stale}
+                    )
+                    facts_by_id = await self.storage.get_facts_by_ids(all_ids)
+                    for conflict in stale:
+                        try:
+                            await self._escalate_conflict(
+                                conflict,
+                                facts_by_id.get(conflict["fact_a_id"]),
+                                facts_by_id.get(conflict["fact_b_id"]),
+                            )
+                        except Exception:
+                            logger.exception("Escalation error for conflict %s", conflict["id"])
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.exception("Escalation loop error")
 
-    async def _escalate_conflict(self, conflict: dict[str, Any]) -> None:
+    async def _escalate_conflict(
+        self,
+        conflict: dict[str, Any],
+        fact_a: dict[str, Any] | None = None,
+        fact_b: dict[str, Any] | None = None,
+    ) -> None:
         """Auto-resolve a stale conflict by preferring the more recent fact.
 
         Closes the older fact's validity window and records a clear audit trail
         indicating this was a system action, not a human decision.
+
+        fact_a / fact_b may be pre-fetched by the caller (escalation loop batch)
+        to avoid repeated get_fact_by_id() queries.
         """
-        fact_a = await self.storage.get_fact_by_id(conflict["fact_a_id"])
-        fact_b = await self.storage.get_fact_by_id(conflict["fact_b_id"])
+        if fact_a is None:
+            fact_a = await self.storage.get_fact_by_id(conflict["fact_a_id"])
+        if fact_b is None:
+            fact_b = await self.storage.get_fact_by_id(conflict["fact_b_id"])
         if not fact_a or not fact_b:
             return
 
