@@ -551,8 +551,8 @@ async def _serve(
     else:
         from engram.storage import SQLiteStorage
         effective_db = db_path or str(DEFAULT_DB_PATH)
-        storage = SQLiteStorage(db_path=effective_db)
-        logger.info("Local mode: SQLite (%s)", effective_db)
+        storage = SQLiteStorage(db_path=effective_db, workspace_id=workspace_id)
+        logger.info("Local mode: SQLite (%s, workspace: %s)", effective_db, workspace_id)
 
     await storage.connect()
 

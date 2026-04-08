@@ -267,8 +267,9 @@ class BaseStorage(ABC):
 class SQLiteStorage(BaseStorage):
     """Async SQLite storage with WAL mode and FTS5."""
 
-    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
+    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH, workspace_id: str = "local") -> None:
         self.db_path = Path(db_path)
+        self.workspace_id = workspace_id
         self._db: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
@@ -336,9 +337,9 @@ class SQLiteStorage(BaseStorage):
             "keywords", "entities", "artifact_hash", "embedding",
             "embedding_model", "embedding_ver", "committed_at",
             "valid_from", "valid_until", "ttl_days",
-            "memory_op", "supersedes_fact_id", "durability",
+            "memory_op", "supersedes_fact_id", "workspace_id", "durability",
         ]
-        defaults = {"memory_op": "add", "durability": "durable"}
+        defaults = {"memory_op": "add", "durability": "durable", "workspace_id": self.workspace_id}
         placeholders = ", ".join(["?"] * len(cols))
         col_names = ", ".join(cols)
         values = [fact.get(c, defaults.get(c)) for c in cols]
@@ -526,13 +527,14 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """SELECT f.* FROM facts f, json_each(f.entities) e
                WHERE f.valid_until IS NULL
+                 AND f.workspace_id = ?
                  AND f.id != ?
                  AND f.scope = ?
                  AND json_extract(e.value, '$.name') = ?
                  AND json_extract(e.value, '$.type') = ?
                  AND json_extract(e.value, '$.value') IS NOT NULL
                  AND CAST(json_extract(e.value, '$.value') AS TEXT) != ?""",
-            (exclude_id, scope, entity_name, entity_type, str(entity_value)),
+            (self.workspace_id, exclude_id, scope, entity_name, entity_type, str(entity_value)),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -544,12 +546,13 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """SELECT f.* FROM facts f, json_each(f.entities) e
                WHERE f.valid_until IS NULL
+                 AND f.workspace_id = ?
                  AND f.id != ?
                  AND json_extract(e.value, '$.name') = ?
                  AND json_extract(e.value, '$.type') = ?
                  AND (json_extract(e.value, '$.value') IS NULL
                       OR CAST(json_extract(e.value, '$.value') AS TEXT) != ?)""",
-            (exclude_id, entity_name, entity_type, str(entity_value)),
+            (self.workspace_id, exclude_id, entity_name, entity_type, str(entity_value)),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
