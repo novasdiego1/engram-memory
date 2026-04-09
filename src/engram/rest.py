@@ -537,6 +537,22 @@ def build_rest_routes(
             "open_conflicts": conflict_count,
         })
 
+    async def api_export(request: Request) -> JSONResponse:
+        fmt = request.query_params.get("format", "json")
+        scope = request.query_params.get("scope")
+
+        if fmt not in ("json", "markdown"):
+            return _error(f"Invalid format '{fmt}'. Supported: json, markdown")
+
+        try:
+            result = await engine.export_workspace(format=fmt, scope=scope)
+        except ValueError as exc:
+            return _error(str(exc))
+        except Exception as exc:
+            logger.exception("REST /api/export error")
+            return _error(str(exc), status=500)
+        return JSONResponse(result)
+
     return [
         Route("/api/commit",        api_commit,        methods=["POST"]),
         Route("/api/query",         api_query,         methods=["POST"]),
@@ -553,4 +569,5 @@ def build_rest_routes(
         Route("/api/lineage/{lineage_id}",      api_lineage,       methods=["GET"]),
         Route("/api/expiring",                  api_expiring,      methods=["GET"]),
         Route("/api/conflicts/bulk-dismiss",    api_bulk_dismiss,  methods=["POST"]),
+        Route("/api/export",                    api_export,        methods=["GET"]),
     ]

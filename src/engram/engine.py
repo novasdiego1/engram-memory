@@ -13,7 +13,7 @@ import logging
 import math
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -834,6 +834,78 @@ class EngramEngine:
         limit = max(1, min(limit, 200))
         return await self.storage.get_current_facts_in_scope(
             scope=scope, fact_type=fact_type, limit=limit
+        )
+
+    # ── engram_export ──────────────────────────────────────────────────
+
+    async def export_workspace(
+        self,
+        format: Literal["json", "markdown"] = "json",
+        scope: str | None = None,
+    ) -> dict[str, Any]:
+        """Export workspace as a portable JSON or Markdown snapshot.
+
+        Retrieves all current facts (durable + ephemeral) and all conflicts,
+        then delegates to the export formatters in engram.export.
+
+        Args:
+            format: "json" or "markdown".
+            scope: Optional scope prefix filter.
+
+        Returns:
+            Export document dict (structure depends on format).
+        """
+        from engram.export import build_json_export, build_markdown_export
+
+        if format not in ("json", "markdown"):
+            raise ValueError(
+                f"Invalid format '{format}'. Supported: json, markdown"
+            )
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        facts = await self.storage.get_current_facts_in_scope(
+            scope=scope,
+            limit=10000,
+            include_ephemeral=True,
+            as_of=now_iso,
+        )
+        if len(facts) >= 10000:
+            logger.warning(
+                "Export hit fact limit (10000) — some facts may be missing"
+            )
+
+        open_conflict_ids = await self.storage.get_open_conflict_fact_ids()
+        for fact in facts:
+            fact["has_open_conflict"] = fact["id"] in open_conflict_ids
+
+        conflicts = await self.get_conflicts(scope=scope, status="all")
+
+        workspace_id = "local"
+        anonymous_mode = False
+        try:
+            from engram.workspace import read_workspace
+            ws = read_workspace()
+            if ws:
+                workspace_id = ws.engram_id
+                anonymous_mode = ws.anonymous_mode
+        except Exception:
+            pass
+
+        if format == "markdown":
+            return build_markdown_export(
+                workspace_id=workspace_id,
+                facts=facts,
+                conflicts=conflicts,
+                scope_filter=scope,
+                anonymous_mode=anonymous_mode,
+            )
+
+        return build_json_export(
+            workspace_id=workspace_id,
+            facts=facts,
+            conflicts=conflicts,
+            scope_filter=scope,
+            anonymous_mode=anonymous_mode,
         )
 
     # ── lineage ───────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -1052,3 +1052,55 @@ async def engram_bulk_dismiss(
         reason=reason,
         dismissed_by=agent_id,
     )
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_export(
+    format: Literal["json", "markdown"] = "json",
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """Export workspace as a portable JSON or Markdown snapshot.
+
+    Use this to create backups, share knowledge with non-Engram users,
+    or migrate data to another workspace.
+
+    JSON format produces a machine-readable document suitable for backup,
+    migration, or tooling integration. It includes all current facts,
+    conflicts, and metadata.
+
+    Markdown format produces a human-readable document grouped by scope.
+    Paste it into Confluence, a PR description, or an onboarding doc.
+
+    IMPORTANT: This is a read-only operation — it does not modify your
+    workspace. Both durable and ephemeral facts are included.
+
+    IMPORTANT: If secrets are detected in fact content, they are
+    automatically redacted and a warning is added to the metadata.
+
+    Parameters:
+    - format: Output format — "json" or "markdown".
+    - scope: Optional scope prefix filter (e.g., "auth" returns facts
+      in "auth", "auth/jwt", "auth/oauth", etc.).
+
+    Returns: Export document with metadata, facts, and conflicts.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+    _ws = _rw()
+    if not _ws:
+        return {
+            "error": "Workspace not initialized. Run engram_init first."
+        }
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+
+    if format not in ("json", "markdown"):
+        return {
+            "error": f"Invalid format '{format}'. Supported: json, markdown"
+        }
+
+    try:
+        return await engine.export_workspace(format=format, scope=scope)
+    except Exception as exc:
+        logger.exception("engram_export error")
+        return {"error": str(exc)}
