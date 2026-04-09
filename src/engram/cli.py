@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import platform as _platform
 import sys
 from pathlib import Path
 
@@ -35,8 +36,6 @@ def main() -> None:
 # Comprehensive list covering all known MCP-compatible IDEs, editors, CLI
 # tools, and desktop apps that store their config in a discoverable file.
 # Entries are grouped by category for readability.
-
-import platform as _platform
 
 
 def _xdg_config() -> Path:
@@ -601,8 +600,8 @@ async def _serve(
         from engram.storage import SQLiteStorage
 
         effective_db = db_path or str(DEFAULT_DB_PATH)
-        storage = SQLiteStorage(db_path=effective_db)
-        logger.info("Local mode: SQLite (%s)", effective_db)
+        storage = SQLiteStorage(db_path=effective_db, workspace_id=workspace_id)
+        logger.info("Local mode: SQLite (%s, workspace: %s)", effective_db, workspace_id)
 
     await storage.connect()
 
@@ -654,7 +653,7 @@ async def _serve(
             from engram.dashboard import build_dashboard_routes
             from engram.federation import build_federation_routes
             import uvicorn
-            from starlette.routing import Mount, Route
+            from starlette.routing import Mount
 
             dashboard_routes = build_dashboard_routes(storage)
             federation_routes = build_federation_routes(storage)
@@ -701,11 +700,13 @@ def token_create(engineer: str, agent_id: str | None, expires_hours: int) -> Non
 
 
 # ── engram config ─────────────────────────────────────────────────────
+# ── engram config ────────────────────────────────────────────────────
 
 
 @main.group()
 def config() -> None:
     """View and update workspace configuration."""
+    """Show and update workspace settings."""
     pass
 
 
@@ -746,6 +747,15 @@ def config_show() -> None:
         click.echo(
             f"Database: {ws.db_url[:40]}..." if len(ws.db_url) > 40 else f"Database: {ws.db_url}"
         )
+    """Pretty-print the current editable workspace settings."""
+    from engram.workspace import read_workspace_settings
+
+    try:
+        settings = read_workspace_settings()
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(json.dumps(settings, indent=2))
 
 
 @config.command("set")
@@ -823,6 +833,63 @@ def tail(interval: int, scope: str | None, max_count: int | None) -> None:
     import urllib.error
 
     ws = None
+    """Update a single editable workspace setting."""
+    from engram.workspace import parse_config_value, set_workspace_setting
+
+    try:
+        parsed_value = parse_config_value(key, value)
+        set_workspace_setting(key, value)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(f"Updated {key}={json.dumps(parsed_value)}")
+
+
+# ── engram search ────────────────────────────────────────────────────
+
+
+def _format_search_results(topic: str, results: list[dict[str, object]]) -> str:
+    """Format search results for human-readable terminal output."""
+    if not results:
+        return f'No results found for "{topic}".'
+
+    lines = [f'Results for "{topic}" ({len(results)}):']
+    for idx, fact in enumerate(results, start=1):
+        scope = fact.get("scope") or "-"
+        content = fact.get("content") or ""
+        lines.append(f"{idx}. [{scope}] {content}")
+
+        meta: list[str] = []
+        if fact.get("fact_type"):
+            meta.append(f"type={fact['fact_type']}")
+        if fact.get("confidence") is not None:
+            meta.append(f"confidence={fact['confidence']:.2f}")
+        if fact.get("verified"):
+            meta.append("verified=yes")
+        if fact.get("provenance"):
+            meta.append(f"provenance={fact['provenance']}")
+        if fact.get("has_open_conflict"):
+            meta.append("open_conflict=yes")
+
+        if meta:
+            lines.append("   " + " ".join(meta))
+
+    return "\n".join(lines)
+
+
+async def _search_once(topic: str, scope: str | None, limit: int, as_json: bool) -> str:
+    """Run one terminal search against the current workspace."""
+    import os
+
+    from engram.engine import EngramEngine
+
+    logger = logging.getLogger("engram")
+
+    # Match the same backend-selection logic used by serve()
+    db_url = os.environ.get("ENGRAM_DB_URL", "")
+    workspace_id = "local"
+    schema = "engram"
+
     try:
         from engram.workspace import read_workspace
 
@@ -883,6 +950,64 @@ def tail(interval: int, scope: str | None, max_count: int | None) -> None:
             time.sleep(interval)
     except KeyboardInterrupt:
         click.echo(f"\nStopped after {count} facts.")
+        if ws and ws.db_url:
+            db_url = ws.db_url
+            workspace_id = ws.engram_id
+            schema = ws.schema
+    except Exception:
+        pass
+
+    if db_url:
+        from engram.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
+        logger.info("Search mode: PostgreSQL (workspace: %s, schema: %s)", workspace_id, schema)
+    else:
+        from engram.storage import SQLiteStorage
+
+        storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=workspace_id)
+        logger.info("Search mode: SQLite (%s, workspace: %s)", DEFAULT_DB_PATH, workspace_id)
+
+    await storage.connect()
+    engine = EngramEngine(storage)
+
+    try:
+        results = await engine.query(topic=topic, scope=scope, limit=limit)
+    finally:
+        await storage.close()
+
+    if as_json:
+        return json.dumps(results, indent=2)
+
+    return _format_search_results(topic, results)
+
+
+@main.command()
+@click.argument("topic")
+@click.option("--scope", default=None, help="Optional scope prefix to filter results.")
+@click.option(
+    "--limit",
+    default=10,
+    type=click.IntRange(1, 50),
+    show_default=True,
+    help="Maximum results to print.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print raw JSON results for piping.")
+def search(topic: str, scope: str | None, limit: int, as_json: bool) -> None:
+    """Query the workspace directly from the terminal without an agent session."""
+    try:
+        output = asyncio.run(
+            _search_once(
+                topic=topic,
+                scope=scope,
+                limit=limit,
+                as_json=as_json,
+            )
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(output)
 
 
 # ── engram verify ────────────────────────────────────────────────────
@@ -911,10 +1036,10 @@ def verify(verbose: bool) -> None:
     # Check 1: workspace.json exists and is valid JSON
     click.echo("\n[1/4] Checking workspace configuration...")
     if not WORKSPACE_PATH.exists():
-        click.echo(f"  ✗ ~/.engram/workspace.json not found")
-        click.echo(f"    → Run: engram init   (or: engram join <key>)")
+        click.echo("  ✗ ~/.engram/workspace.json not found")
+        click.echo("    → Run: engram init   (or: engram join <key>)")
         click.echo(
-            f"    → Docs: https://github.com/Agentscreator/Engram/blob/main/docs/QUICKSTART.md"
+            "    → Docs: https://github.com/Agentscreator/Engram/blob/main/docs/QUICKSTART.md"
         )
         all_passed = False
     else:
@@ -929,7 +1054,7 @@ def verify(verbose: bool) -> None:
                 click.echo(f"    - anonymous_mode: {ws.anonymous_mode if ws else 'N/A'}")
         except json.JSONDecodeError as e:
             click.echo(f"  ✗ workspace.json is invalid JSON: {e}")
-            click.echo(f"    → Delete and re-run: rm ~/.engram/workspace.json && engram init")
+            click.echo("    → Delete and re-run: rm ~/.engram/workspace.json && engram init")
             all_passed = False
 
     # Check 2: Backend is reachable (team mode only)
@@ -953,15 +1078,15 @@ def verify(verbose: bool) -> None:
                     all_passed = False
         except urllib.error.URLError as e:
             # Non-critical: backend might not have /health endpoint
-            click.echo(f"  ⚠ Could not reach health endpoint (non-critical)")
+            click.echo("  ⚠ Could not reach health endpoint (non-critical)")
             if verbose:
                 click.echo(f"    - URL: {mcp_url}")
                 click.echo(f"    - Error: {e.reason}")
-                click.echo(f"    - Note: Backend connectivity will be verified by your IDE")
+                click.echo("    - Note: Backend connectivity will be verified by your IDE")
         except Exception as e:
             click.echo(f"  ⚠ Could not verify backend ({type(e).__name__}: {e})")
             if verbose:
-                click.echo(f"    - This is normal if you're offline or the backend is busy")
+                click.echo("    - This is normal if you're offline or the backend is busy")
     else:
         click.echo("  ○ Team mode not configured (local SQLite mode)")
         if verbose:
@@ -1004,11 +1129,11 @@ def verify(verbose: bool) -> None:
                 click.echo(f"    - ✓ {client_name}")
     else:
         click.echo("  ✗ Engram not found in any IDE MCP config")
-        click.echo(f"    → Run: engram install")
+        click.echo("    → Run: engram install")
         all_passed = False
 
     if missing and verbose:
-        click.echo(f"\n  Other detected IDEs (Engram not configured):")
+        click.echo("\n  Other detected IDEs (Engram not configured):")
         for client_name in missing[:5]:  # Limit verbose output
             click.echo(f"    - ○ {client_name}")
         if len(missing) > 5:
@@ -1033,12 +1158,12 @@ def verify(verbose: bool) -> None:
             break
 
     if not found_model:
-        click.echo(f"  ⚠ NLI model not cached (will download on first conflict detection)")
+        click.echo("  ⚠ NLI model not cached (will download on first conflict detection)")
         if verbose:
-            click.echo(f"    - Model: cross-encoder/nli-MiniLM2-L6-H768")
-            click.echo(f"    - Will be downloaded automatically when needed")
+            click.echo("    - Model: cross-encoder/nli-MiniLM2-L6-H768")
+            click.echo("    - Will be downloaded automatically when needed")
             click.echo(
-                f"    - This is optional - Engram works without it (Tier 1 detection disabled)"
+                "    - This is optional - Engram works without it (Tier 1 detection disabled)"
             )
 
     # Summary
@@ -1116,12 +1241,10 @@ def reembed(model: str | None, batch_size: int, dry_run: bool) -> None:
         from engram.postgres_storage import PostgresStorage
 
         storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
-        mode = "team"
     else:
         from engram.storage import SQLiteStorage, DEFAULT_DB_PATH
 
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH))
-        mode = "local"
 
     async def run_reembed():
         await storage.connect()
@@ -1152,7 +1275,6 @@ def reembed(model: str | None, batch_size: int, dry_run: bool) -> None:
                     continue
 
                 # Count total
-                import asyncio
 
                 all_facts = await storage.get_facts_by_embedding_model(
                     target, limit=100000, offset=0
@@ -1298,9 +1420,8 @@ def setup(
 
         if result.get("status") == "initialized":
             engram_id = result.get("engram_id", "unknown")
-            invite_key = result.get("invite_key", "unknown")
             click.echo(f"  ✓ Workspace initialized: {engram_id}")
-            click.echo(f"  ✓ Invite key generated")
+            click.echo("  ✓ Invite key generated")
         else:
             click.echo(f"  ❌ Setup failed: {result.get('status')}")
             return
@@ -1340,6 +1461,67 @@ This project uses Engram for team memory. Before starting work on any task:
     click.echo("  1. Restart your IDE")
     click.echo("  2. Run: engram verify")
     click.echo("  3. Start working with your team!\n")
+
+
+# ── engram completion ─────────────────────────────────────────────────
+
+_SHELL_CONFIGS = {
+    "bash": ("~/.bashrc", 'eval "$(_ENGRAM_COMPLETE=bash_source engram)"'),
+    "zsh": ("~/.zshrc", 'eval "$(_ENGRAM_COMPLETE=zsh_source engram)"'),
+    "fish": (
+        "~/.config/fish/completions/engram.fish",
+        "_ENGRAM_COMPLETE=fish_source engram | source",
+    ),
+}
+
+
+@main.command()
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]), required=False)
+def completion(shell: str | None) -> None:
+    """Install shell tab-completion for engram.
+
+    Detects your current shell automatically, or pass bash/zsh/fish
+    explicitly. Appends the completion hook to your shell profile.
+
+    \b
+    Examples:
+        engram completion          # auto-detect shell
+        engram completion zsh      # explicit shell
+    """
+    import os
+
+    if shell is None:
+        current = os.environ.get("SHELL", "")
+        if "zsh" in current:
+            shell = "zsh"
+        elif "fish" in current:
+            shell = "fish"
+        elif "bash" in current:
+            shell = "bash"
+        else:
+            click.echo(f"Could not detect shell from $SHELL={current!r}.")
+            click.echo("Please specify explicitly: engram completion bash|zsh|fish")
+            raise SystemExit(1)
+
+    config_path, snippet = _SHELL_CONFIGS[shell]
+
+    if shell == "fish":
+        # Fish completions go in a dedicated file, not appended to a profile
+        target = Path(config_path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(snippet + "\n")
+        click.echo(f"Wrote fish completions to {target}")
+    else:
+        target = Path(config_path).expanduser()
+        # Check if already installed
+        if target.exists() and snippet in target.read_text():
+            click.echo(f"Engram completions already installed in {config_path}")
+            return
+        with target.open("a") as f:
+            f.write(f"\n# Engram shell completion\n{snippet}\n")
+        click.echo(f"Appended completion hook to {config_path}")
+
+    click.echo(f"Restart your shell or run: source {config_path}")
 
 
 if __name__ == "__main__":
