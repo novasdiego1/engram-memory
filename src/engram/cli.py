@@ -796,6 +796,95 @@ def config_set(key: str, value: str) -> None:
     click.echo(f"✓ Updated {key} = {value}")
 
 
+# ── engram tail ─────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.option("--interval", default=2, type=int, help="Polling interval in seconds (default: 2).")
+@click.option("--scope", default=None, help="Filter by scope prefix (e.g., 'payments').")
+@click.option(
+    "--max-count", default=None, type=int, help="Stop after N facts (default: run forever)."
+)
+def tail(interval: int, scope: str | None, max_count: int | None) -> None:
+    """Live stream of incoming workspace commits.
+
+    Like 'tail -f' but for shared team memory. Polls for new facts committed
+    to the workspace and prints them in real-time.
+
+    Examples:
+        engram tail                    # Stream all new facts
+        engram tail --scope payments   # Only facts in payments scope
+        engram tail --interval 5      # Poll every 5 seconds
+        engram tail --max-count 10     # Stop after 10 facts
+    """
+    import os
+    import time
+    import urllib.request
+    import urllib.error
+
+    ws = None
+    try:
+        from engram.workspace import read_workspace
+
+        ws = read_workspace()
+    except Exception:
+        pass
+
+    # Determine the MCP URL
+    mcp_url = os.environ.get("ENGRAM_MCP_URL", "http://localhost:7474")
+    base_url = mcp_url.replace("/mcp", "") if "/mcp" in mcp_url else mcp_url
+
+    # Get workspace ID for filtering
+    workspace_id = ws.engram_id if ws and ws.engram_id else "local"
+    if ws and ws.db_url:
+        scope_filter = f"{workspace_id}.{scope}" if scope else workspace_id
+    else:
+        scope_filter = scope or workspace_id
+
+    last_time = int(time.time() * 1000)
+    count = 0
+
+    click.echo(f"Watching for new facts... (polling every {interval}s, scope: {scope_filter})")
+    click.echo("Press Ctrl+C to stop\n")
+
+    try:
+        while True:
+            try:
+                url = f"{base_url}/api/federation/facts?after={last_time}&scope={scope_filter}&limit=50"
+                req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                    facts = data.get("facts", [])
+
+                    for fact in facts:
+                        fact_time = fact.get("created_at", 0)
+                        if fact_time > last_time:
+                            last_time = fact_time
+
+                        agent = fact.get("agent_id", "?")
+                        fact_scope = fact.get("scope", "")
+                        content = fact.get("content", "")[:100]
+                        if len(fact.get("content", "")) > 100:
+                            content += "..."
+
+                        click.echo(f"[{agent}] [{fact_scope}] {content}")
+
+                        count += 1
+                        if max_count and count >= max_count:
+                            click.echo(f"\nReached {max_count} facts, stopping.")
+                            return
+            except urllib.error.URLError as e:
+                click.echo(f"Warning: Could not fetch facts: {e.reason}", err=True)
+            except json.JSONDecodeError:
+                click.echo("Warning: Invalid response from server", err=True)
+            except Exception as e:
+                click.echo(f"Error: {e}", err=True)
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        click.echo(f"\nStopped after {count} facts.")
+
+
 # ── engram verify ────────────────────────────────────────────────────
 
 
