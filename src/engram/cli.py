@@ -1256,9 +1256,8 @@ def setup(
 
         if result.get("status") == "initialized":
             engram_id = result.get("engram_id", "unknown")
-            invite_key = result.get("invite_key", "unknown")
             click.echo(f"  ✓ Workspace initialized: {engram_id}")
-            click.echo(f"  ✓ Invite key generated")
+            click.echo("  ✓ Invite key generated")
         else:
             click.echo(f"  ❌ Setup failed: {result.get('status')}")
             return
