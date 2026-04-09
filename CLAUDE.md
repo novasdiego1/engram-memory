@@ -85,12 +85,12 @@ All source lives under `src/engram/`.
 - `engram_bulk_dismiss` — Batch dismiss conflicts
 - `engram_export` — Export data (JSON, Markdown)
 
-## Code Style
+## Rules
 
-- **Linter:** Ruff (`target-version = py311`, `line-length = 100`)
-- **Python:** 3.11+ required
-- **Async:** All storage and engine operations are async (`aiosqlite`, `asyncpg`)
-- Match existing patterns — read surrounding code before adding new conventions
+@.claude/rules/clean-code.md
+@.claude/rules/clean-architecture.md
+@.claude/rules/code-style.md
+@.claude/rules/testing.md
 
 ## Key Documentation
 
