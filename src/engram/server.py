@@ -838,6 +838,7 @@ async def engram_batch_commit(
 
     # Key generation check
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -920,6 +921,7 @@ async def engram_feedback(
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -945,6 +947,7 @@ async def engram_timeline(
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -964,6 +967,7 @@ async def engram_agents() -> list[dict[str, Any]]:
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -986,6 +990,7 @@ async def engram_lineage(lineage_id: str) -> list[dict[str, Any]]:
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -1008,6 +1013,7 @@ async def engram_expiring(days_ahead: int = 7) -> list[dict[str, Any]]:
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -1042,6 +1048,7 @@ async def engram_bulk_dismiss(
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     _disc = await _check_key_generation(_ws)
     if _disc:
@@ -1051,6 +1058,7 @@ async def engram_bulk_dismiss(
         reason=reason,
         dismissed_by=agent_id,
     )
+
 
 @mcp.tool(annotations={"readOnlyHint": True})
 async def engram_export(
@@ -1084,19 +1092,16 @@ async def engram_export(
     """
     engine = get_engine()
     from engram.workspace import read_workspace as _rw
+
     _ws = _rw()
     if not _ws:
-        return {
-            "error": "Workspace not initialized. Run engram_init first."
-        }
+        return {"error": "Workspace not initialized. Run engram_init first."}
     _disc = await _check_key_generation(_ws)
     if _disc:
         return _disc
 
     if format not in ("json", "markdown"):
-        return {
-            "error": f"Invalid format '{format}'. Supported: json, markdown"
-        }
+        return {"error": f"Invalid format '{format}'. Supported: json, markdown"}
 
     try:
         return await engine.export_workspace(format=format, scope=scope)

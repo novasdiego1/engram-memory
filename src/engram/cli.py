@@ -698,6 +698,7 @@ def token_create(engineer: str, agent_id: str | None, expires_hours: int) -> Non
     tok = create_token(engineer=engineer, agent_id=agent_id, expires_hours=expires_hours)
     click.echo(tok)
 
+
 # ── engram config ────────────────────────────────────────────────────
 
 
@@ -734,8 +735,8 @@ def config_set(key: str, value: str) -> None:
         raise click.ClickException(str(e))
 
     click.echo(f"Updated {key}={json.dumps(parsed_value)}")
-    
-    
+
+
 # ── engram verify ────────────────────────────────────────────────────
 
 
@@ -1041,6 +1042,8 @@ def reembed(model: str | None, batch_size: int, dry_run: bool) -> None:
             await storage.close()
 
     asyncio.run(run_reembed())
+
+
 # ── engram completion ─────────────────────────────────────────────────
 
 _SHELL_CONFIGS = {

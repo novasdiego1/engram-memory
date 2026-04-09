@@ -65,9 +65,7 @@ async def test_commit_rejects_bad_confidence(engine: EngramEngine):
 @pytest.mark.asyncio
 async def test_commit_rejects_bad_fact_type(engine: EngramEngine):
     with pytest.raises(ValueError, match="fact_type"):
-        await engine.commit(
-            content="test", scope="test", confidence=0.5, fact_type="guess"
-        )
+        await engine.commit(content="test", scope="test", confidence=0.5, fact_type="guess")
 
 
 @pytest.mark.asyncio
@@ -236,17 +234,19 @@ async def test_resolve_winner(engine: EngramEngine):
     from datetime import datetime, timezone
 
     conflict_id = uuid.uuid4().hex
-    await engine.storage.insert_conflict({
-        "id": conflict_id,
-        "fact_a_id": r1["fact_id"],
-        "fact_b_id": r2["fact_id"],
-        "detected_at": datetime.now(timezone.utc).isoformat(),
-        "detection_tier": "tier0_entity",
-        "nli_score": None,
-        "explanation": "Version conflict",
-        "severity": "high",
-        "status": "open",
-    })
+    await engine.storage.insert_conflict(
+        {
+            "id": conflict_id,
+            "fact_a_id": r1["fact_id"],
+            "fact_b_id": r2["fact_id"],
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+            "detection_tier": "tier0_entity",
+            "nli_score": None,
+            "explanation": "Version conflict",
+            "severity": "high",
+            "status": "open",
+        }
+    )
 
     result = await engine.resolve(
         conflict_id=conflict_id,
@@ -334,7 +334,9 @@ async def test_commit_ephemeral_not_returned_in_normal_query(engine: EngramEngin
     results = await engine.query(topic="flag", scope="flags")
     contents = [r["content"] for r in results]
     assert "Production flag is stable" in contents
-    assert "Temporary flag is on" not in contents, "Ephemeral facts must not appear in durable queries"
+    assert "Temporary flag is on" not in contents, (
+        "Ephemeral facts must not appear in durable queries"
+    )
 
 
 @pytest.mark.asyncio
@@ -398,17 +400,19 @@ async def test_resolve_dismissed(engine: EngramEngine):
     from datetime import datetime, timezone
 
     conflict_id = uuid.uuid4().hex
-    await engine.storage.insert_conflict({
-        "id": conflict_id,
-        "fact_a_id": r1["fact_id"],
-        "fact_b_id": r2["fact_id"],
-        "detected_at": datetime.now(timezone.utc).isoformat(),
-        "detection_tier": "tier1_nli",
-        "nli_score": 0.87,
-        "explanation": None,
-        "severity": "medium",
-        "status": "open",
-    })
+    await engine.storage.insert_conflict(
+        {
+            "id": conflict_id,
+            "fact_a_id": r1["fact_id"],
+            "fact_b_id": r2["fact_id"],
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+            "detection_tier": "tier1_nli",
+            "nli_score": 0.87,
+            "explanation": None,
+            "severity": "medium",
+            "status": "open",
+        }
+    )
 
     result = await engine.resolve(
         conflict_id=conflict_id,
