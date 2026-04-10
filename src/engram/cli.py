@@ -1258,7 +1258,7 @@ def setup(
     if not db_url:
         db_url = os.environ.get("ENGRAM_DB_URL", "")
 
-    backend_mode: str | None = None  # "cloud", "self-hosted", "local"
+    backend_mode: str | None = None  # "cloud", "postgres", "sqlite"
 
     if not db_url and not dry_run:
         try:
@@ -1270,26 +1270,26 @@ def setup(
             return
 
         choice = questionary.select(
-            "Which database would you like to use for storing team memory?",
+            "Which storage backend do you want to use?",
             choices=[
                 questionary.Choice(
-                    "Engram Cloud (Recommended)  —  Hosted backend, dashboard included, invite key"
-                    " required. Zero infrastructure setup.",
+                    "Engram Cloud (Recommended)\n     Hosted backend with dashboard included."
+                    " Requires an invite key. Zero infrastructure setup.",
                     value="cloud",
                 ),
                 questionary.Choice(
-                    "Self-hosted (PostgreSQL + pgvector)  —  Run your own server."
-                    " Full control, multi-machine.",
-                    value="self-hosted",
+                    "PostgreSQL (Self-hosted)\n     Run your own server with pgvector."
+                    " Full control, multi-machine support.",
+                    value="postgres",
                 ),
                 questionary.Choice(
-                    "Local only (SQLite)  —  No dashboard, no cross-agent sync."
-                    " Single machine, offline.",
-                    value="local",
+                    "SQLite (Local only)\n     No dashboard, no cross-agent sync."
+                    " Single machine, offline use only.",
+                    value="sqlite",
                 ),
                 questionary.Choice(
-                    "Chat about this",
-                    value="chat",
+                    "Help me choose",
+                    value="help",
                 ),
             ],
             use_arrow_keys=True,
@@ -1299,22 +1299,22 @@ def setup(
             # User hit Ctrl-C
             return
 
-        if choice == "chat":
+        if choice == "help":
             click.echo("")
             click.echo("Engram storage options:")
             click.echo("")
-            click.echo("  Engram Cloud  (Recommended for most teams)")
+            click.echo("  Engram Cloud  (Recommended)")
             click.echo("    • Hosted backend managed by the Engram team")
             click.echo("    • Dashboard and invite-key sharing included")
             click.echo("    • Join with:  engram join <invite-key>")
             click.echo("    • No servers to run or maintain")
             click.echo("")
-            click.echo("  Self-hosted PostgreSQL + pgvector")
+            click.echo("  PostgreSQL (Self-hosted)")
             click.echo("    • You control the database (Neon, Supabase, Railway, or your own)")
             click.echo("    • Required for on-prem / air-gapped environments")
             click.echo("    • Pass your URL:  engram setup --db-url postgres://...")
             click.echo("")
-            click.echo("  Local only (SQLite)")
+            click.echo("  SQLite (Local only)")
             click.echo("    • Zero config — works offline immediately")
             click.echo("    • Knowledge stays on this machine (no cross-agent sync)")
             click.echo("    • Run:  engram setup --local")
@@ -1325,12 +1325,12 @@ def setup(
 
         if backend_mode == "cloud":
             click.echo("")
-            click.echo("Engram Cloud backend selected.")
+            click.echo("Engram Cloud selected.")
             click.echo("  To join an existing workspace:  engram join <invite-key>")
             click.echo("  (Cloud workspaces are provisioned via invite key — no DB URL needed.)")
             return
 
-        if backend_mode == "self-hosted":
+        if backend_mode == "postgres":
             db_url = questionary.text(
                 "PostgreSQL connection URL:",
                 placeholder="postgres://user:password@host:5432/dbname",
@@ -1339,10 +1339,10 @@ def setup(
                 click.echo("❌ No database URL provided. Aborting.")
                 return
 
-        if backend_mode == "local":
+        if backend_mode == "sqlite":
             click.echo("")
-            click.echo("Local SQLite mode selected — no database URL needed.")
-            db_url = ""  # empty string = local mode throughout
+            click.echo("SQLite mode selected — no database URL needed.")
+            db_url = ""  # empty string = SQLite mode throughout
 
     # Step 2: Detect and configure MCP clients
     if skip_mcp:
