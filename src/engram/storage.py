@@ -544,6 +544,7 @@ class SQLiteStorage(BaseStorage):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        offset: int = 0,
         include_ephemeral: bool = False,
     ) -> list[dict]:
         """Retrieve currently valid facts, optionally filtered."""
@@ -571,9 +572,10 @@ class SQLiteStorage(BaseStorage):
 
         where = " AND ".join(conditions)
         params.append(limit)
+        params.append(offset)
 
         cursor = await self.db.execute(
-            f"SELECT * FROM facts WHERE {where} ORDER BY committed_at DESC LIMIT ?",
+            f"SELECT * FROM facts WHERE {where} ORDER BY committed_at DESC LIMIT ? OFFSET ?",
             params,
         )
         rows = await cursor.fetchall()

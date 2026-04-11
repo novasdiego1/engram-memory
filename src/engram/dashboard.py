@@ -101,11 +101,13 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         fact_type = request.query_params.get("fact_type")
         as_of = request.query_params.get("as_of")
         search_query = request.query_params.get("q", "").strip()
+        offset = int(request.query_params.get("offset", 0))
+        limit = int(request.query_params.get("limit", 100))
 
         # Use FTS search if query provided
         if search_query:
             try:
-                fts_rowids = await storage.fts_search(search_query, limit=50)
+                fts_rowids = await storage.fts_search(search_query, limit=limit, offset=offset)
                 if fts_rowids:
                     facts = await storage.get_facts_by_rowids(fts_rowids)
                 else:
@@ -113,15 +115,19 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
             except Exception:
                 # FTS fallback - use regular query
                 facts = await storage.get_current_facts_in_scope(
-                    scope=scope, fact_type=fact_type, as_of=as_of, limit=100
+                    scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=offset
                 )
         else:
             facts = await storage.get_current_facts_in_scope(
-                scope=scope, fact_type=fact_type, as_of=as_of, limit=100
+                scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=offset
             )
 
         conflict_ids = await storage.get_open_conflict_fact_ids()
-        return HTMLResponse(_render_facts_table(facts, conflict_ids, search_query=search_query))
+        return HTMLResponse(
+            _render_facts_table(
+                facts, conflict_ids, search_query=search_query, offset=offset, limit=limit
+            )
+        )
 
     async def conflict_queue(request: Request) -> HTMLResponse:
         scope = request.query_params.get("scope")
@@ -672,7 +678,13 @@ def _agent_row(a: dict) -> str:
     )
 
 
-def _render_facts_table(facts: list[dict], conflict_ids: set[str], search_query: str = "") -> str:
+def _render_facts_table(
+    facts: list[dict],
+    conflict_ids: set[str],
+    search_query: str = "",
+    offset: int = 0,
+    limit: int = 100,
+) -> str:
     rows = []
     for f in facts:
         has_conflict = f["id"] in conflict_ids
@@ -700,6 +712,18 @@ def _render_facts_table(facts: list[dict], conflict_ids: set[str], search_query:
             f"<td>{conflict_badge} {ver_badge}</td>"
             f"<td>{_esc(f.get('committed_at', '')[:19])}</td></tr>"
         )
+
+    prev_offset = max(0, offset - limit)
+    next_offset = offset + limit if len(facts) == limit else offset
+    pagination = ""
+    if offset > 0 or len(facts) == limit:
+        pagination = f"""
+        <div class="pagination" style="display:flex;gap:0.5rem;margin-top:1rem;">
+          <a href="?q={_esc(search_query)}&offset={prev_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if offset == 0 else ""}>&larr; Previous</a>
+          <span style="padding:0.4rem 0.8rem;color:#5a8a5a;">Page {offset // limit + 1}</span>
+          <a href="?q={_esc(search_query)}&offset={next_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if len(facts) < limit else ""}>Next &rarr;</a>
+        </div>"""
+
     body = f"""
     <h2>Knowledge Base</h2>
     <div class="filter-bar">
@@ -713,6 +737,8 @@ def _render_facts_table(facts: list[dict], conflict_ids: set[str], search_query:
           <option value="decision">decision</option>
         </select>
         <input name="as_of" placeholder="as_of (ISO 8601)" value="">
+        <input type="hidden" name="offset" value="{offset}">
+        <input type="hidden" name="limit" value="{limit}">
         <button type="submit">Search</button>
       </form>
     </div>
@@ -723,7 +749,8 @@ def _render_facts_table(facts: list[dict], conflict_ids: set[str], search_query:
       {"".join(rows)}
     </table>
     </div>
-    <p class="count-note">{len(facts)} fact(s)</p>"""
+    <p class="count-note">{len(facts)} fact(s)</p>
+    {pagination}"""
     return _dash_layout(
         "Knowledge Base", body, active="facts", workspace_name=_get_workspace_name()
     )
