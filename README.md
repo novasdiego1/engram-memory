@@ -204,6 +204,7 @@ engram config show        # Display configuration
 engram config set <key>   # Update configuration
 engram tail               # Live stream of workspace commits
 engram verify             # Verify installation
+engram doctor             # Diagnose setup issues
 engram completion <shell> # Install shell tab completion
 ```
 

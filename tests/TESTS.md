@@ -70,6 +70,6 @@ Validates that contradictory facts are surfaced as conflicts, that severity clas
 | `test_cli_install.py` | `engram install` IDE config injection |
 | `test_cli_search.py` | `engram search` CLI command |
 | `test_cli_tail.py` | `engram tail` live-tail command |
-| `test_verify.py` | `engram verify` schema and connectivity checks |
+| `test_verify.py` | `engram verify` / `engram doctor` schema, connectivity, MCP, and NLI checks |
 | `test_install_sh.py` | Shell installer script correctness |
 | `test_rediscovery_experiment.py` | Rediscovery / re-embedding experiment harness |
