@@ -51,6 +51,7 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         resolved_conflicts = await storage.count_conflicts("resolved")
         agents = await storage.get_agents()
         expiring = await storage.get_expiring_facts(days_ahead=7)
+        recent_activity = await storage.get_fact_timeline(limit=10)
         return HTMLResponse(
             _render_index(
                 facts_count=facts_count,
@@ -60,6 +61,7 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 agents=agents,
                 expiring_count=len(expiring),
                 workspace_error=workspace_error,
+                recent_activity=recent_activity,
             )
         )
 
@@ -128,10 +130,16 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=0
             )
 
+        scopes = await storage.get_distinct_scopes()
         conflict_ids = await storage.get_open_conflict_fact_ids()
         return HTMLResponse(
             _render_facts_table(
-                facts, conflict_ids, search_query=search_query, offset=offset, limit=limit
+                facts,
+                conflict_ids,
+                search_query=search_query,
+                offset=offset,
+                limit=limit,
+                scopes=scopes,
             )
         )
 
@@ -139,7 +147,12 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         scope = request.query_params.get("scope")
         status = request.query_params.get("status", "open")
         conflicts = await storage.get_conflicts(scope=scope, status=status)
-        return HTMLResponse(_render_conflicts_page(conflicts))
+
+        stats = {
+            "open": await storage.count_conflicts("open"),
+            "resolved": await storage.count_conflicts("resolved"),
+        }
+        return HTMLResponse(_render_conflicts_page(conflicts, stats=stats))
 
     async def approve_suggestion(request: Request) -> Response:
         """HTMX endpoint: approve the LLM-suggested resolution for a conflict."""
@@ -535,6 +548,7 @@ def _dash_layout(
       <a href="/dashboard/agents"{_nav_cls("agents")}>Agents</a>
       <a href="/dashboard/expiring"{_nav_cls("expiring")}>Expiring</a>
       <a href="/dashboard/settings"{_nav_cls("settings")}>Settings</a>
+      <a href="#" onclick="showShortcuts();return false;" style="margin-left:auto;font-size:0.75rem;color:#9ab89a;">⌨ Shortcuts</a>
     </nav>
     {body}
   </div>
@@ -544,6 +558,14 @@ def _dash_layout(
       const isDark = html.classList.contains('dark');
       html.classList.toggle('dark');
       localStorage.setItem('engram-theme', isDark ? 'light' : 'dark');
+    }}
+    function showShortcuts() {{
+      alert('Keyboard Shortcuts:\n\n' +
+        'j/k - Navigate conflicts up/down\n' +
+        'a - Approve conflict fact A\n' +
+        'b - Approve conflict fact B\n' +
+        's - Dismiss/skip conflict\n' +
+        '? - Show this help');
     }}
     // Keyboard navigation for conflict queue
     document.addEventListener('keydown', function(e) {{
@@ -593,6 +615,7 @@ def _render_index(
     agents: list[dict],
     expiring_count: int,
     workspace_error: str | None = None,
+    recent_activity: list[dict] | None = None,
 ) -> str:
     # Show workspace error if present
     error_html = ""
@@ -665,12 +688,25 @@ def _render_index(
         <div class="stat-label">Expiring (7d)</div>
       </div>
     </div>
-    <h2>Recent Agents</h2>
-    <div class="table-wrap">
-    <table>
-      <tr><th>Agent</th><th>Engineer</th><th>Commits</th><th>Flagged</th><th>Last Seen</th></tr>
-      {"".join(_agent_row(a) for a in agents[:10])}
-    </table>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1.5rem;">
+      <div>
+        <h2>Recent Activity</h2>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Fact</th><th>Scope</th><th>When</th></tr>
+          {"".join(f"<tr><td class='content-cell'>{_esc(f.get('content', '')[:60])}</td><td>{_esc(f.get('scope', ''))}</td><td>{_esc(f.get('committed_at', '')[:16])}</td></tr>" for f in (recent_activity or [])[:10])}
+        </table>
+        </div>
+      </div>
+      <div>
+        <h2>Recent Agents</h2>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Agent</th><th>Commits</th></tr>
+          {"".join(f"<tr><td>{_esc(a.get('agent_id', ''))}</td><td>{a.get('total_commits', 0)}</td></tr>" for a in agents[:5])}
+        </table>
+        </div>
+      </div>
     </div>"""
     return _dash_layout("Overview", body, active="overview", workspace_name=_get_workspace_name())
 
@@ -692,6 +728,7 @@ def _render_facts_table(
     search_query: str = "",
     offset: int = 0,
     limit: int = 100,
+    scopes: list[str] | None = None,
 ) -> str:
     rows = []
     for f in facts:
@@ -732,12 +769,16 @@ def _render_facts_table(
           <a href="?q={_esc(search_query)}&offset={next_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if len(facts) < limit else ""}>Next &rarr;</a>
         </div>"""
 
+    scope_options = ""
+    if scopes:
+        scope_options = "".join(f'<option value="{_esc(s)}">{_esc(s)}</option>' for s in scopes)
     body = f"""
     <h2>Knowledge Base</h2>
     <div class="filter-bar">
       <form method="get" action="/dashboard/facts" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input type="text" name="q" placeholder="Search facts..." value="{_esc(search_query)}" style="min-width:200px;">
-        <input name="scope" placeholder="Scope filter" value="">
+        <input name="scope" placeholder="Scope filter" value="" list="scopes-list">
+        <datalist id="scopes-list">{scope_options}</datalist>
         <select name="fact_type">
           <option value="">All types</option>
           <option value="observation">observation</option>
@@ -748,6 +789,9 @@ def _render_facts_table(
         <input type="hidden" name="offset" value="{offset}">
         <input type="hidden" name="limit" value="{limit}">
         <button type="submit">Search</button>
+        <a href="?fact_type=observation" class="btn-dismiss">Observations</a>
+        <a href="?fact_type=inference" class="btn-dismiss">Inferences</a>
+        <a href="?fact_type=decision" class="btn-dismiss">Decisions</a>
       </form>
     </div>
     <div class="table-wrap">
@@ -764,12 +808,33 @@ def _render_facts_table(
     )
 
 
-def _render_conflicts_page(conflicts: list[dict]) -> str:
+def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> str:
     cards = "".join(_render_conflict_card(c) for c in conflicts)
     if not cards:
         cards = '<p style="color:#9ab89a;font-size:0.85rem;padding:1rem 0;">No conflicts found.</p>'
+
+    open_count = (
+        sum(1 for c in conflicts if c.get("status") == "open")
+        if stats is None
+        else stats.get("open", 0)
+    )
+    resolved_count = (
+        sum(1 for c in conflicts if c.get("status") == "resolved")
+        if stats is None
+        else stats.get("resolved", 0)
+    )
     body = f"""
     <h2>Conflict Queue</h2>
+    <div class="stats">
+      <div class="stat stat-warn">
+        <div class="stat-value">{open_count}</div>
+        <div class="stat-label">Open</div>
+      </div>
+      <div class="stat stat-ok">
+        <div class="stat-value">{resolved_count}</div>
+        <div class="stat-label">Resolved</div>
+      </div>
+    </div>
     <div class="filter-bar">
       <form method="get" action="/dashboard/conflicts" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input name="scope" placeholder="Scope filter" value="">
