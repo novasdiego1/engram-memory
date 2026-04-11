@@ -122,6 +122,12 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=offset
             )
 
+        if not facts and offset > 0:
+            offset = 0
+            facts = await storage.get_current_facts_in_scope(
+                scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=0
+            )
+
         conflict_ids = await storage.get_open_conflict_fact_ids()
         return HTMLResponse(
             _render_facts_table(
