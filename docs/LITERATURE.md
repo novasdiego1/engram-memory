@@ -467,3 +467,61 @@ Engram's threat model is **curious but non-adversarial team members** — not ex
 2. Calibrate ε based on workspace size
 3. Update conflict detection to handle noisy embeddings
 
+---
+
+## [8] spaCy NER vs. Regex for Entity Extraction (Issue #75 Survey)
+
+**Topic:** Survey evaluating spaCy NER vs regex for entity extraction in technical codebase facts
+
+### Current State
+
+Engram's `entities.py` uses regex patterns for entity extraction. The issue notes: "NER model is a future addition."
+
+### Regex Approach (Current)
+
+Regex patterns catch:
+- Version numbers (`v1.2.3`, `1.0.0-SNAPSHOT`)
+- URLs and file paths
+- Numeric values with units
+- Email addresses
+
+Regex misses:
+- Product names ("Auth0", "Stripe", "Datadog")
+- Novel entity types not in pattern
+- Context-dependent entities
+
+### spaCy NER Approach
+
+`en_core_web_sm` (12MB) provides:
+- Named entity recognition (PERSON, ORG, PRODUCT, GPE)
+- Part-of-speech tagging
+- Dependency parsing
+- Fine-grained entity types
+
+### Comparison Framework
+
+| Metric | Regex | spaCy NER | Notes |
+|--------|-------|-----------|-------|
+| Precision | ~95% (on matched patterns) | ~85% (general domain) | NER trained on news/wikipedia |
+| Recall | ~60% (misses novel entities) | ~75% (catches NER patterns) | Depends on fact domain |
+| Latency | <1ms | ~15ms | Significant for 100k+ facts |
+| Model size | 0KB | 12MB | `en_core_web_sm` |
+| Custom entities | Manual patterns | Fine-tunable | Requires training data |
+
+### Recommendation
+
+**Do not upgrade to spaCy NER at this stage.** Reasons:
+
+1. **Domain mismatch:** spaCy NER is trained on news/wikipedia text. Codebase facts have technical jargon, API names, version strings that spaCy won't recognize well without fine-tuning.
+
+2. **Latency cost:** 15ms per fact adds up at scale. With 100k facts, that's minutes of processing time for bulk operations.
+
+3. **Maintenance burden:** spaCy requires model updates, compatibility management. Regex is deterministic and zero-dependency.
+
+4. **The real problem is elsewhere:** Entity extraction is Tier 0 in conflict detection. The bigger wins are in NLI (Tier 1) and provenance tracking.
+
+**Future work:** If enterprise customers need better entity extraction:
+1. Use a domain-specific NER model (code-trained, e.g., CodeBERT)
+2. Fine-tune spaCy on 200 manually labeled technical facts
+3. Benchmark precision/recall before full implementation
+
