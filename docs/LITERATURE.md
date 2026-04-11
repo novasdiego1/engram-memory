@@ -525,3 +525,49 @@ Regex misses:
 2. Fine-tune spaCy on 200 manually labeled technical facts
 3. Benchmark precision/recall before full implementation
 
+---
+
+## [9] Temporal Reasoning Primitives Beyond Validity Intervals (Issue #80 Survey)
+
+**Topic:** Survey of temporal reasoning primitives beyond Engram's `valid_from`/`valid_until` model
+
+### Current State
+
+Engram uses a simple bitemporal model:
+- `valid_from`: When the fact became true in the world
+- `valid_until`: When the fact stopped being true (optional, null = current)
+- `committed_at`: When the system recorded the fact
+
+### Allen's Interval Algebra
+
+James F. Allen's 13 temporal relations between intervals:
+
+| Relation | Symbol | Example Query |
+|----------|--------|---------------|
+| X precedes Y | X < Y | "Did the auth service use JWT before we switched to OAuth?" |
+| X meets Y | X m Y | "Did v1.0 immediately follow v0.9?" |
+| X overlaps Y | X o Y | "Did the legacy API overlap with the new one?" |
+| X starts Y | X s Y | "Did the deprecation notice start on the release date?" |
+| X during Y | X d Y | "Was the outage during the maintenance window?" |
+| X equals Y | X = Y | "Did the two facts become true at the same time?" |
+
+### Gaps in Current Engram Model
+
+| Query Type | Current Support | Gap |
+|------------|-----------------|-----|
+| "Was A true when B was committed?" | ❌ No | Need commit-time-based temporal join |
+| "Did A precede B in world-time?" | ✅ Yes | valid_from comparison |
+| "What changed between commits X and Y?" | ❌ No | Need temporal diff operation |
+| "Was this fact ever true during [interval]?" | Partial | valid_from/valid_until check only |
+| "When did fact A become inconsistent with B?" | ❌ No | Need lineage + temporal intersection |
+
+### Recommended Extensions (Future Work)
+
+1. **Commit-time queries:** Add `committed_at` to temporal filtering. "Show me facts that were committed while fact X was current."
+
+2. **Temporal join:** Allow queries like "Find all facts that contradicted fact X within 7 days of its commit."
+
+3. **Change detection:** "What changed in scope X between commit times T1 and T2?" — useful for understanding team knowledge evolution.
+
+4. **Recommendation:** Do not implement now. The current model handles 90% of use cases. These are advanced features for v2.
+
