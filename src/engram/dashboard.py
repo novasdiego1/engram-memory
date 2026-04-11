@@ -203,7 +203,8 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
     async def timeline(request: Request) -> HTMLResponse:
         scope = request.query_params.get("scope")
         facts = await storage.get_fact_timeline(scope=scope, limit=100)
-        return HTMLResponse(_render_timeline(facts))
+        scopes = await storage.get_distinct_scopes()
+        return HTMLResponse(_render_timeline(facts, scopes=scopes))
 
     async def agents_view(request: Request) -> HTMLResponse:
         search_query = request.query_params.get("q", "").strip()
@@ -975,7 +976,7 @@ def _render_conflict_card(c: dict) -> str:
     )
 
 
-def _render_timeline(facts: list[dict]) -> str:
+def _render_timeline(facts: list[dict], scopes: list[str] | None = None) -> str:
     rows = []
     for f in facts:
         is_superseded = f.get("valid_until") is not None
@@ -991,11 +992,15 @@ def _render_timeline(facts: list[dict]) -> str:
             f"<td>{valid_range}</td>"
             f"<td><div class='{bar_class}' style='width:60px;'></div></td></tr>"
         )
+    scope_options = ""
+    if scopes:
+        scope_options = "".join(f'<option value="{_esc(s)}">{_esc(s)}</option>' for s in scopes)
     body = f"""
     <h2>Timeline</h2>
     <div class="filter-bar">
       <form method="get" action="/dashboard/timeline" style="display:flex;gap:0.5rem;">
-        <input name="scope" placeholder="Scope filter" value="">
+        <input name="scope" placeholder="Scope filter" value="" list="scopes-list">
+        <datalist id="scopes-list">{scope_options}</datalist>
         <button type="submit">Filter</button>
       </form>
     </div>
