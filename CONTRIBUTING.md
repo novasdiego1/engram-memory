@@ -28,7 +28,7 @@ python -m engram.cli serve --http
 # 5. Ask your agent (Claude Code, Cursor, etc.) to set up Engram
 # Your agent will call engram_init and you'll see it working.
 
-# 5. Make a change → open a PR
+# 6. Make a change → open a PR
 git checkout -b your-feature-or-fix
 ```
 
