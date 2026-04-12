@@ -103,6 +103,7 @@ async def _get_pool() -> Any:
                     await conn.execute(stmt)
                 except Exception as exc:
                     import sys
+
                     print(f"[auth] bootstrap warning: {exc}", file=sys.stderr)
 
     return _pool
