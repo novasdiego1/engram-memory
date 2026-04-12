@@ -30,43 +30,41 @@ JWT_SECRET = os.environ.get("ENGRAM_JWT_SECRET", "")
 
 _pool: Any = None
 
-# Flat schema — no FK constraints, no ALTER TABLE.
-# FK ordering bugs and ALTER TABLE IF NOT EXISTS incompatibilities have caused
-# the pool to never initialise, breaking every endpoint including login.
-# Tables that already exist (from mcp.py) are skipped via IF NOT EXISTS.
+# Schema-qualified DDL so table creation never relies on search_path being set.
+# No FK constraints — avoids ordering issues between auth.py and mcp.py.
 _AUTH_SCHEMA_STMTS = [
-    """CREATE TABLE IF NOT EXISTS workspaces (
-        engram_id         TEXT PRIMARY KEY,
-        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        anonymous_mode    BOOLEAN     NOT NULL DEFAULT false,
-        anon_agents       BOOLEAN     NOT NULL DEFAULT false,
-        key_generation    INTEGER     NOT NULL DEFAULT 0,
-        paused            BOOLEAN     NOT NULL DEFAULT false,
-        storage_bytes     BIGINT      NOT NULL DEFAULT 0,
-        plan              TEXT        NOT NULL DEFAULT 'hobby',
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.workspaces (
+        engram_id          TEXT PRIMARY KEY,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        anonymous_mode     BOOLEAN     NOT NULL DEFAULT false,
+        anon_agents        BOOLEAN     NOT NULL DEFAULT false,
+        key_generation     INTEGER     NOT NULL DEFAULT 0,
+        paused             BOOLEAN     NOT NULL DEFAULT false,
+        storage_bytes      BIGINT      NOT NULL DEFAULT 0,
+        plan               TEXT        NOT NULL DEFAULT 'hobby',
         stripe_customer_id TEXT
     )""",
-    """CREATE TABLE IF NOT EXISTS users (
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.users (
         id                 TEXT PRIMARY KEY,
         email              TEXT UNIQUE NOT NULL,
         password_hash      TEXT NOT NULL,
         created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         stripe_customer_id TEXT
     )""",
-    """CREATE TABLE IF NOT EXISTS user_workspaces (
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.user_workspaces (
         user_id   TEXT NOT NULL,
         engram_id TEXT NOT NULL,
         role      TEXT NOT NULL DEFAULT 'owner',
         PRIMARY KEY (user_id, engram_id)
     )""",
-    """CREATE TABLE IF NOT EXISTS invite_keys (
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.invite_keys (
         key_hash       TEXT PRIMARY KEY,
         engram_id      TEXT NOT NULL,
         created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         expires_at     TIMESTAMPTZ,
         uses_remaining INTEGER
     )""",
-    """CREATE TABLE IF NOT EXISTS workspace_keys (
+    f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.workspace_keys (
         engram_id     TEXT PRIMARY KEY,
         pin_salt      TEXT NOT NULL,
         encrypted_key TEXT NOT NULL
@@ -84,21 +82,29 @@ async def _get_pool() -> Any:
         async def _set_path(c: Any) -> None:
             await c.execute(f"SET search_path TO {SCHEMA}, public")
 
+        # 1. Create the schema namespace
         conn = await asyncpg.connect(DB_URL)
         try:
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+        finally:
+            await conn.close()
+
+        # 2. Create the pool (login works from this point on)
+        _pool = await asyncpg.create_pool(
+            DB_URL, min_size=1, max_size=3, command_timeout=30, init=_set_path
+        )
+
+        # 3. Bootstrap tables — schema-qualified so search_path doesn't matter.
+        #    Run inside a single connection so all tables are created atomically.
+        async with _pool.acquire() as conn:
             await conn.execute(f"SET search_path TO {SCHEMA}, public")
             for stmt in _AUTH_SCHEMA_STMTS:
                 try:
                     await conn.execute(stmt)
-                except Exception:
-                    pass  # table already exists with different definition — that's fine
-        finally:
-            await conn.close()
+                except Exception as exc:
+                    import sys
+                    print(f"[auth] bootstrap warning: {exc}", file=sys.stderr)
 
-        _pool = await asyncpg.create_pool(
-            DB_URL, min_size=1, max_size=3, command_timeout=30, init=_set_path
-        )
     return _pool
 
 
@@ -522,11 +528,11 @@ async def handle_create_workspace(request: Request) -> JSONResponse:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "INSERT INTO workspaces (engram_id) VALUES ($1)",
+                    f"INSERT INTO {SCHEMA}.workspaces (engram_id) VALUES ($1)",
                     engram_id,
                 )
                 await conn.execute(
-                    """INSERT INTO invite_keys (key_hash, engram_id, expires_at, uses_remaining)
+                    f"""INSERT INTO {SCHEMA}.invite_keys (key_hash, engram_id, expires_at, uses_remaining)
                        VALUES ($1, $2, $3, $4)""",
                     key_hash,
                     engram_id,
@@ -534,14 +540,14 @@ async def handle_create_workspace(request: Request) -> JSONResponse:
                     1000,
                 )
                 await conn.execute(
-                    """INSERT INTO workspace_keys (engram_id, pin_salt, encrypted_key)
+                    f"""INSERT INTO {SCHEMA}.workspace_keys (engram_id, pin_salt, encrypted_key)
                        VALUES ($1, $2, $3)""",
                     engram_id,
                     pin_salt,
                     encrypted_key,
                 )
                 await conn.execute(
-                    """INSERT INTO user_workspaces (user_id, engram_id, role)
+                    f"""INSERT INTO {SCHEMA}.user_workspaces (user_id, engram_id, role)
                        VALUES ($1, $2, 'owner')""",
                     session["sub"],
                     engram_id,
