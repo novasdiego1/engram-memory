@@ -222,10 +222,43 @@ def _render_dashboard() -> str:
     }
     .auth-switch button:hover { opacity: 0.8; }
 
+    /* Mobile auth logo (shown only when brand panel is hidden) */
+    .auth-mobile-logo {
+      display: none; align-items: center; gap: 9px;
+      font-size: 20px; font-weight: 700; color: var(--em4); letter-spacing: -0.03em;
+      text-decoration: none; margin-bottom: 36px; justify-content: center;
+    }
+    .auth-mobile-logo-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--em4);
+      box-shadow: 0 0 10px var(--em4), 0 0 20px rgba(52,211,153,0.2);
+    }
+
+    /* Modal field inputs */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block; font-size: 13px; font-weight: 500; color: var(--t2); margin-bottom: 7px;
+    }
+    .field input {
+      width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(52,211,153,0.1); border-radius: 10px; font-size: 14px;
+      font-family: inherit; color: var(--t1);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .field input:focus {
+      outline: none; background: rgba(255,255,255,0.06);
+      border-color: var(--em5); box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+    }
+    .field input::placeholder { color: rgba(167,243,208,0.25); }
+
     @media (max-width: 900px) {
       .auth-layout { grid-template-columns: 1fr; }
       .auth-brand { display: none; }
-      .auth-form-panel { padding: 48px 28px; min-height: 100vh; }
+      .auth-form-panel {
+        padding: 48px 28px; min-height: 100vh;
+        align-items: flex-start; padding-top: 64px;
+      }
+      .auth-mobile-logo { display: flex; }
+      .auth-form-heading { font-size: 22px; }
     }
 
     /* ── WORKSPACE LIST ─────────────────────────────────────────── */
@@ -520,7 +553,9 @@ def _render_dashboard() -> str:
     @media (max-width: 480px) {
       .stat-num { font-size: 22px; }
       .stat-card { padding: 12px 14px; }
-      .auth-form-panel { padding: 32px 20px; }
+      .auth-form-panel { padding: 48px 20px; }
+      .auth-mobile-logo { margin-bottom: 28px; }
+      .pin-digit { width: 46px; height: 54px; font-size: 22px; }
     }
   </style>
 </head>
@@ -552,21 +587,34 @@ def _render_dashboard() -> str:
       <p class="auth-brand-sub">Every agent on your team sees the same verified facts,<br>conflicts, and decisions — in real time.</p>
       <div class="auth-features">
         <div class="auth-feature">
-          <div class="auth-feature-icon">⚡</div>
+          <div class="auth-feature-icon">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="var(--em4)" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
           <div class="auth-feature-text">
             <strong>Zero setup</strong>
             <span>One invite key. Works with any MCP-compatible IDE.</span>
           </div>
         </div>
         <div class="auth-feature">
-          <div class="auth-feature-icon">🔒</div>
+          <div class="auth-feature-icon">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="var(--em4)" stroke-width="1.8">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
           <div class="auth-feature-text">
             <strong>Private by default</strong>
             <span>All data encrypted. Never shared, always yours.</span>
           </div>
         </div>
         <div class="auth-feature">
-          <div class="auth-feature-icon">🧠</div>
+          <div class="auth-feature-icon">
+            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="var(--em4)" stroke-width="1.8">
+              <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+              <path stroke-linecap="round" d="M12 7v4m0 0l-5.5 6M12 11l5.5 6"/>
+            </svg>
+          </div>
           <div class="auth-feature-text">
             <strong>Conflict detection</strong>
             <span>Automatically flags contradictions across agents.</span>
@@ -578,6 +626,9 @@ def _render_dashboard() -> str:
     <!-- Right: form -->
     <div class="auth-form-panel">
       <div class="auth-form-inner">
+        <a href="/" class="auth-mobile-logo">
+          <span class="auth-mobile-logo-dot"></span>engram
+        </a>
         <h2 class="auth-form-heading" id="auth-heading">Welcome back</h2>
         <p class="auth-form-sub" id="auth-subheading">Sign in to your Engram account</p>
 
