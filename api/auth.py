@@ -30,6 +30,19 @@ JWT_SECRET = os.environ.get("ENGRAM_JWT_SECRET", "")
 
 # Tables this module manages (workspaces table is created by mcp.py but referenced here)
 _AUTH_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS workspaces (
+    engram_id      TEXT PRIMARY KEY,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    anonymous_mode BOOLEAN NOT NULL DEFAULT false,
+    anon_agents    BOOLEAN NOT NULL DEFAULT false,
+    key_generation INTEGER NOT NULL DEFAULT 0
+);
+
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS paused            BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS storage_bytes     BIGINT  NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan              TEXT    NOT NULL DEFAULT 'hobby';
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+
 CREATE TABLE IF NOT EXISTS users (
     id                 TEXT PRIMARY KEY,
     email              TEXT UNIQUE NOT NULL,
