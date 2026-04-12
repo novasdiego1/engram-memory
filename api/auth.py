@@ -440,7 +440,9 @@ def _generate_team_id() -> str:
     return f"ENG-{part(4)}-{part(4)}"
 
 
-def _generate_invite_key(engram_id: str, expires_days: int = 3650, uses: int = 1000) -> tuple[str, str]:
+def _generate_invite_key(
+    engram_id: str, expires_days: int = 3650, uses: int = 1000
+) -> tuple[str, str]:
     import json as _json
     import time as _time
 
@@ -551,7 +553,9 @@ async def handle_invite_key(request: Request) -> JSONResponse:
                 engram_id,
             )
             if not owns:
-                return JSONResponse({"error": "Workspace not found or access denied"}, status_code=403)
+                return JSONResponse(
+                    {"error": "Workspace not found or access denied"}, status_code=403
+                )
 
             row = await conn.fetchrow(
                 "SELECT pin_salt, encrypted_key FROM workspace_keys WHERE engram_id = $1",
@@ -562,7 +566,9 @@ async def handle_invite_key(request: Request) -> JSONResponse:
 
     if not row:
         return JSONResponse(
-            {"error": "No invite key stored for this workspace. It may have been created outside the dashboard."},
+            {
+                "error": "No invite key stored for this workspace. It may have been created outside the dashboard."
+            },
             status_code=404,
         )
 
