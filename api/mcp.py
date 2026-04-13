@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS user_workspaces (
 # ── DB pool ──────────────────────────────────────────────────────────
 
 # Bump this version whenever _SCHEMA_SQL changes (new tables, columns, indexes).
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _pool: Any = None
 _schema_version_applied: int = 0
 
@@ -175,6 +175,28 @@ async def _ensure_schema(pool: Any) -> None:
             SCHEMA,
         )
         if exists:
+            # Migrate data from old 'engram' schema to public if needed
+            old_schema_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema = 'engram' AND table_name = 'workspaces')"
+            )
+            if old_schema_exists:
+                for table in [
+                    "workspaces",
+                    "invite_keys",
+                    "facts",
+                    "conflicts",
+                    "agents",
+                    "users",
+                    "user_workspaces",
+                ]:
+                    try:
+                        await conn.execute(
+                            f"INSERT INTO public.{table} SELECT * FROM engram.{table} "
+                            f"ON CONFLICT DO NOTHING"
+                        )
+                    except Exception:
+                        pass  # Table might not exist in old schema or columns differ
             _schema_version_applied = _SCHEMA_VERSION
             return
         # Tables don't exist — run bootstrap
