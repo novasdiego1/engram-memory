@@ -23,10 +23,10 @@ def _render_dashboard() -> str:
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
-      --bg: #050a0e; --bg2: #0a1118; --bg-card: rgba(13,23,33,0.7);
-      --border: rgba(52,211,153,0.08); --border-glow: rgba(52,211,153,0.2);
+      --bg: #080808; --bg2: #0f0f0f; --bg-card: rgba(255,255,255,0.03);
+      --border: rgba(255,255,255,0.07); --border-glow: rgba(52,211,153,0.3);
       --em4: #34d399; --em5: #10b981; --em6: #059669; --em7: #047857;
-      --t1: #f0fdf4; --t2: rgba(209,250,229,0.6); --tm: rgba(167,243,208,0.35);
+      --t1: #ffffff; --t2: rgba(255,255,255,0.6); --tm: rgba(255,255,255,0.35);
       --red: #f87171; --yellow: #fbbf24; --blue: #38bdf8;
     }
     html { scroll-behavior: smooth; }
@@ -34,8 +34,9 @@ def _render_dashboard() -> str:
       background: var(--bg); min-height: 100vh; -webkit-font-smoothing: antialiased;
       position: relative; }
     body::before { content: ''; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-      background: radial-gradient(ellipse at 15% 0%, rgba(52,211,153,0.025) 0%, transparent 50%),
-                  radial-gradient(ellipse at 85% 100%, rgba(6,182,212,0.015) 0%, transparent 50%); }
+      background: radial-gradient(ellipse at 15% 0%, rgba(52,211,153,0.04) 0%, transparent 55%),
+                  radial-gradient(ellipse at 85% 100%, rgba(6,182,212,0.025) 0%, transparent 55%);
+      animation: ambientShift 12s ease-in-out infinite alternate; }
     .container { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
 
     /* Header */
@@ -1115,10 +1116,6 @@ function renderWsGrid(workspaces) {
     return;
   }
   el.innerHTML = workspaces.map(ws => {
-    const commits = ws.commit_count_month || 0;
-    const commitLimit = ws.commit_limit || 500;
-    const pct = Math.min(100, (commits / commitLimit) * 100);
-    const fillClass = pct >= 100 ? 'over' : pct >= 80 ? 'near' : '';
     const isPaused = ws.paused;
     const plan = ws.plan || 'free';
     const wsId = esc(ws.engram_id);
@@ -1132,8 +1129,6 @@ function renderWsGrid(workspaces) {
           <span class="badge ${isPaused ? 'badge-paused' : 'badge-active'}">${isPaused ? 'Paused' : 'Active'}</span>
           <span class="badge badge-${plan === 'pro' ? 'pro' : 'free'}">${plan}</span>
         </div>
-        <div class="ws-usage-bar"><div class="ws-usage-fill ${fillClass}" style="width:${pct}%"></div></div>
-        <div class="ws-usage-label">${commits.toLocaleString()} / ${commitLimit.toLocaleString()} commits</div>
       </div>
       <div class="ws-card-footer">
         <button class="ws-rename-btn" onclick="event.stopPropagation();openWorkspaceAndRename('${wsId}')">
