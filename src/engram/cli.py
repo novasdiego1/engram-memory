@@ -1015,6 +1015,120 @@ def search(topic: str, scope: str | None, limit: int, as_json: bool) -> None:
     click.echo(output)
 
 
+# ── engram import ────────────────────────────────────────────────────
+
+
+async def _import_once(
+    import_path: Path,
+    scope: str,
+    pattern: str,
+    dry_run: bool,
+) -> str:
+    """Import local Markdown/text files into the current workspace."""
+    from engram.engine import EngramEngine
+    from engram.importer import import_documents
+
+    storage = None
+    engine: EngramEngine
+
+    if dry_run:
+        engine = EngramEngine(storage=None)  # type: ignore[arg-type]
+    else:
+        import os
+
+        db_url = os.environ.get("ENGRAM_DB_URL", "")
+        workspace_id = "local"
+        schema = "engram"
+
+        try:
+            from engram.workspace import read_workspace
+
+            ws = read_workspace()
+            if ws and ws.db_url:
+                db_url = ws.db_url
+                workspace_id = ws.engram_id
+                schema = ws.schema
+        except Exception:
+            pass
+
+        if db_url:
+            from engram.postgres_storage import PostgresStorage
+
+            storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
+        else:
+            from engram.storage import SQLiteStorage
+
+            storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=workspace_id)
+
+        await storage.connect()
+        engine = EngramEngine(storage)
+
+    try:
+        summary = await import_documents(
+            engine,
+            import_path,
+            scope=scope,
+            pattern=pattern,
+            dry_run=dry_run,
+        )
+    finally:
+        if storage is not None:
+            await storage.close()
+
+    lines = [
+        "Engram import summary",
+        f"  Files scanned   : {summary.files_scanned}",
+        f"  Facts extracted : {summary.facts_extracted}",
+        f"  Committed       : {summary.committed}",
+        f"  Duplicates      : {summary.duplicates}",
+        f"  Skipped         : {summary.skipped}",
+    ]
+
+    if dry_run and summary.dry_run_facts:
+        lines.append("")
+        lines.append("Dry run facts:")
+        for idx, fact in enumerate(summary.dry_run_facts, start=1):
+            lines.append(f"  {idx}. [{fact['scope']}] {fact['content']}")
+            lines.append(f"     provenance={fact['provenance']}")
+
+    if summary.errors:
+        lines.append("")
+        lines.append("Errors:")
+        for issue in summary.errors[:10]:
+            lines.append(f"  - {issue.source}: {issue.message}")
+        if len(summary.errors) > 10:
+            lines.append(f"  ... {len(summary.errors) - 10} more")
+
+    return "\n".join(lines)
+
+
+@main.command("import")
+@click.argument("import_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--dry-run", is_flag=True, help="Preview extracted facts without committing.")
+@click.option("--scope", default="imported", show_default=True, help="Scope for imported facts.")
+@click.option(
+    "--pattern",
+    default="*",
+    show_default=True,
+    help='Glob pattern for supported files, for example "*.md".',
+)
+def import_cmd(import_path: Path, dry_run: bool, scope: str, pattern: str) -> None:
+    """Bulk-ingest Markdown/text files into workspace memory."""
+    try:
+        output = asyncio.run(
+            _import_once(
+                import_path=import_path,
+                scope=scope,
+                pattern=pattern,
+                dry_run=dry_run,
+            )
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(output)
+
+
 # ── engram tail ──────────────────────────────────────────────────────
 
 

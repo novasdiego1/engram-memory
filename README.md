@@ -118,6 +118,7 @@ Agents without MCP support connect via the REST API using the credentials in `.e
 engram install          # Configure your IDE and install the auto-commit hook
 engram verify           # Check that everything is connected
 engram search <query>   # Query workspace memory from the terminal
+engram import <path>    # Bulk-ingest Markdown/text docs
 engram tail             # Live stream of commits as they happen
 engram serve --http     # Run the MCP server locally (port 7474)
 ```
