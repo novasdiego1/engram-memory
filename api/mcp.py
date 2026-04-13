@@ -507,18 +507,9 @@ async def _tool_join(invite_key: str, pool: Any) -> dict:
     key_hash = _invite_key_hash(invite_key)
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT uses_remaining FROM invite_keys WHERE key_hash = $1", key_hash
-        )
+        row = await conn.fetchrow("SELECT engram_id FROM invite_keys WHERE key_hash = $1", key_hash)
         if not row:
             return {"status": "error", "message": "Invite key not found or revoked"}
-        if row["uses_remaining"] is not None and row["uses_remaining"] <= 0:
-            return {"status": "error", "message": "Invite key has no uses remaining"}
-        if row["uses_remaining"] is not None:
-            await conn.execute(
-                "UPDATE invite_keys SET uses_remaining = uses_remaining - 1 WHERE key_hash = $1",
-                key_hash,
-            )
 
     # Auto-accept terms on join — the terms are presented in the response
     async with pool.acquire() as conn:
