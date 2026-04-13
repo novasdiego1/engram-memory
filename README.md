@@ -94,45 +94,9 @@ Create an account at [engram-memory.com](https://engram-memory.com) to start a w
 
 ---
 
-## How It Works
-
-```
-┌──────────────────────────────────────────┐
-│            MCP Tools                     │
-│  engram_commit  — Write a fact           │
-│  engram_query   — Read team knowledge    │
-│  engram_conflicts — See disagreements    │
-│  engram_resolve — Settle conflicts       │
-├──────────────────────────────────────────┤
-│        Conflict Detection                │
-│  Tier 0: Entity exact-match              │
-│  Tier 1: NLI cross-encoder (local)       │
-│  Tier 2: Numeric/temporal rules          │
-│  Tier 3: LLM escalation (rare)           │
-├──────────────────────────────────────────┤
-│          Hosted Storage                  │
-│  Managed Postgres — zero setup           │
-│  Isolated per workspace                  │
-└──────────────────────────────────────────┘
-```
-
-No database to provision, no servers to run, no ports to open. Install and go.
-
----
-
 ## Privacy & Security
 
-Your memory is yours. This isn't a footnote — it's the foundation Engram is built on.
-
-**Encrypted.** All data is encrypted in transit (TLS) and at rest. Invite keys use encrypted payloads so teammates never see raw credentials.
-
-**Isolated.** Every workspace is fully isolated. There is no cross-workspace access, no shared tables, no data leakage between teams.
-
-**Never read.** We don't read your facts. We don't analyze your memory. We don't train on your data. We don't sell it. We have no analytics pipeline that touches your content. Period.
-
-**Never redistributed.** Your team's knowledge never leaves your workspace. It is never shared with other users, other teams, or third parties. Not now, not ever.
-
-**You control it.** Delete your workspace and everything is gone. Anonymous mode strips engineer names from all commits. Anonymous agents randomize agent IDs each session. You decide what's visible and what isn't.
+Your data is encrypted in transit and at rest, fully isolated per workspace, and never read, analyzed, trained on, or shared with anyone. Delete your workspace and everything is gone.
 
 ---
 
