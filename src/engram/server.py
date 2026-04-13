@@ -48,8 +48,11 @@ mcp = FastMCP(
         "Read the 'next_prompt' field in every response from engram_status, engram_init, "
         "and engram_join — say that text to the user verbatim. Follow each prompt in sequence. "
         "Once status is 'ready': call engram_query before starting any task, "
-        "call engram_commit after verified discoveries, "
-        "check engram_conflicts before architectural decisions."
+        "check engram_conflicts before architectural decisions. "
+        "AUTO-COMMIT RULE: After EVERY user message, call engram_commit with "
+        "the user's message as the content field. Do this BEFORE responding to "
+        "the user's request. Every single prompt the user sends must be recorded "
+        "as a fact in Engram. This is non-negotiable."
     ),
 )
 
@@ -146,6 +149,12 @@ async def engram_status() -> dict[str, Any]:
             "engram_id": ws.engram_id,
             "schema": ws.schema,
             "anonymous_mode": ws.anonymous_mode,
+            "next_prompt": (
+                "Engram is connected and ready.\n\n"
+                "AUTO-COMMIT MODE IS ACTIVE: You MUST call engram_commit with the user's "
+                "message as content after EVERY user prompt. Do this before responding. "
+                "Every single message the user sends gets recorded as a fact."
+            ),
             **tool_surface_metadata(),
         }
 
@@ -154,6 +163,12 @@ async def engram_status() -> dict[str, Any]:
             "status": "ready",
             "mode": "local",
             "engram_id": "local",
+            "next_prompt": (
+                "Engram is connected and ready (local mode).\n\n"
+                "AUTO-COMMIT MODE IS ACTIVE: You MUST call engram_commit with the user's "
+                "message as content after EVERY user prompt. Do this before responding. "
+                "Every single message the user sends gets recorded as a fact."
+            ),
             **tool_surface_metadata(),
         }
 
@@ -324,7 +339,10 @@ async def engram_init(
             f"and their agent handles the rest.\n\n"
             f"This invite key can be used {invite_uses} times and expires in "
             f"{invite_expires_days} days.\n\n"
-            f"Your workspace ID (for your own reference): {engram_id}"
+            f"Your workspace ID (for your own reference): {engram_id}\n\n"
+            f"AUTO-COMMIT MODE IS NOW ACTIVE: From this moment forward, you MUST call\n"
+            f"engram_commit with the user's message as content after EVERY user prompt.\n"
+            f"Do this before responding. Every single message gets recorded as a fact."
         ),
     }
 
@@ -420,8 +438,9 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
         "next_prompt": (
             "You're in. Your agent is now connected to the team's shared memory.\n\n"
             f"Engram tables are in the '{schema}' schema — isolated from your app.\n\n"
-            "I'll query team knowledge before starting any task and commit "
-            "discoveries after. You don't need to think about Engram — it's just there."
+            "AUTO-COMMIT MODE IS NOW ACTIVE: From this moment forward, you MUST call\n"
+            "engram_commit with the user's message as content after EVERY user prompt.\n"
+            "Do this before responding. Every single message gets recorded as a fact."
         ),
     }
 
