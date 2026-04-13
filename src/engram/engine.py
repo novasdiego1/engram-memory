@@ -1852,9 +1852,9 @@ class EngramEngine:
             "always" in content_lower,
             "never" in content_lower,
         ]
-        if sum(high_signals) >= 2:
+        if sum(high_signals) >= 1:
             return "high"
-        if sum(high_signals) >= 1 or sum(medium_signals) >= 2:
+        if sum(medium_signals) >= 1:
             return "medium"
         return "low"
 
