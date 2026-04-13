@@ -46,6 +46,9 @@ _AUTH_SCHEMA_STMTS = [
         display_name       TEXT
     )""",
     f"ALTER TABLE {SCHEMA}.workspaces ADD COLUMN IF NOT EXISTS display_name TEXT",
+    f"ALTER TABLE {SCHEMA}.workspaces ADD COLUMN IF NOT EXISTS commit_count_month INTEGER NOT NULL DEFAULT 0",
+    f"ALTER TABLE {SCHEMA}.workspaces ADD COLUMN IF NOT EXISTS commit_month TEXT",
+    f"ALTER TABLE {SCHEMA}.workspaces ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT",
     f"""CREATE TABLE IF NOT EXISTS {SCHEMA}.users (
         id                 TEXT PRIMARY KEY,
         email              TEXT UNIQUE NOT NULL,

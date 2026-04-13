@@ -1,78 +1,43 @@
-# Engram Pricing & Usage Tiers
+# Engram Pricing
 
-## Free Tier Limits
+## Model: Commit-Volume Tiers
 
-The free tier is designed for individual developers and small teams to get started with Engram.
+Engram charges on commit volume — the unit that directly drives compute cost. No per-seat pricing (agents aren't humans), no per-conflict pricing (that penalizes users when things go wrong).
 
-| Resource | Free Tier Limit |
-|----------|----------------|
-| Facts (total) | 1,000 |
-| Agents | 3 |
-| API requests/month | 10,000 |
-| Storage | 100 MB |
-| Invite links | 1 |
+| Tier | Price | Commits/mo | Conflict Detection | LLM Suggestions | History |
+|---|---|---|---|---|---|
+| Free | $0 | 500 | ✅ | ❌ | 30 days |
+| Builder | $12/mo | 5,000 | ✅ | ✅ | 90 days |
+| Team | $39/mo | 25,000 | ✅ | ✅ | 1 year |
+| Scale | $99/mo | 100,000 | ✅ | ✅ | Unlimited |
 
-## Paid Tiers
+Overage: $0.015/commit above the tier limit. Prevents churn on spikes without forcing a mid-month upgrade.
 
-### Pro ($19/month)
-- Facts: 50,000
-- Agents: 20
-- API requests/month: 100,000
-- Storage: 5 GB
-- Priority support
+## Why This Model
 
-### Team ($49/month)
-- Facts: 200,000
-- Agents: 100
-- API requests/month: 500,000
-- Storage: 25 GB
-- Advanced analytics
-- Custom scopes
+- Free tier includes conflict detection — that's the hook. Don't gate the differentiator, gate the scale and intelligence.
+- LLM suggestions are gated on paid tiers — near-zero implementation cost to toggle, but feels like a meaningful upgrade.
+- Commit volume maps directly to compute cost. Each commit triggers LLM-based conflict detection against the full fact corpus.
+- No "per seat" — the right unit is agent activity (commits), not human seats. Teams might have 50 agents and 3 humans.
+- History gating on free costs nothing to enforce but creates real pull toward paid.
 
-### Enterprise (Custom pricing)
-- Unlimited facts
-- Unlimited agents
-- Unlimited API calls
-- Unlimited storage
-- SSO/SAML
-- Dedicated support
-- SLA guarantee
+## What We Don't Do
 
-## In-Product Upgrade Prompts
+- Per-conflict pricing — punishes users when we catch something (perverse incentive)
+- Storage-based pricing — facts are tiny, users feel nickel-and-dimed for nothing
+- Per-agent pricing — trivially gamed by sharing one agent identity
 
-When users approach their limits, Engram displays contextual upgrade prompts:
-
-### Fact Limit Warning
-```
-⚠ You've used 900/1,000 facts (90%)
-Upgrade to Pro for 50,000 facts → [Upgrade Now]
-```
-
-### Agent Limit Warning
-```
-⚠ You've added 3/3 agents (100%)
-Upgrade to Pro for 20 agents → [Upgrade Now]
-```
-
-### Rate Limit Warning
-```
-⚠ Rate limit reached (10,000/month)
-Upgrade to Pro for 100k requests/month → [Upgrade Now]
-```
-
-## Checking Your Usage
+## Checking Usage
 
 ```bash
-# Check current usage
 engram stats --json
-
-# Check workspace limits
 engram config show
 ```
 
 ## Implementation Notes
 
-- Usage is tracked per workspace
-- Limits are enforced at the API level
-- Upgrade prompts appear in dashboard and CLI
-- Hard limits return 429 status with upgrade URL
+- Usage tracked per workspace via `commit_count_month` column
+- Limits enforced at the API level in `_tool_commit`
+- Overage commits succeed but are billed at $0.015/commit
+- Hard limit returns 429 with upgrade URL when no payment method is on file
+- Plan upgrades via Stripe Checkout on the dashboard
