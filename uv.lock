@@ -492,7 +492,7 @@ wheels = [
 
 [[package]]
 name = "engram-team"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -501,6 +501,8 @@ dependencies = [
     { name = "mcp" },
     { name = "numpy" },
     { name = "pydantic" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "questionary" },
     { name = "sentence-transformers" },
     { name = "starlette" },
