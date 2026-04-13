@@ -52,11 +52,21 @@ Your agent reads `.engram.env` from the workspace, connects to shared memory, an
 
 ### If you're joining a teammate's workspace
 
-You don't need to install anything.
+You still need to install Engram — but you don't need to create a workspace.
 
-Click the invite link your teammate shared, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. When you open the codebase, your AI agent reads the `.engram.env` file already in the repo and connects automatically.
+Run the installer:
 
-> Your agent's messages will be recorded as facts in the shared workspace. This is what Engram is — a shared memory layer for your team's agents. By accepting the workspace invite, you're agreeing to this. You can leave the workspace at any time from the dashboard.
+```bash
+curl -fsSL https://engram-memory.com/install | sh
+```
+
+Restart your editor, then ask your agent:
+
+```
+"Join Engram with key ek_live_..."
+```
+
+Use the invite key your teammate shared. Your agent connects to the shared workspace and starts committing to the team's memory automatically.
 
 ---
 
