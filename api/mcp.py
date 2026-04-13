@@ -31,7 +31,7 @@ from starlette.routing import Route
 logger = logging.getLogger("engram")
 
 DB_URL = os.environ.get("ENGRAM_DB_URL", "")
-SCHEMA = "engram"
+SCHEMA = "public"
 
 # Billing
 HOBBY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MiB — same as Neon's free tier
@@ -166,6 +166,8 @@ async def _ensure_schema(pool: Any) -> None:
     if _schema_version_applied >= _SCHEMA_VERSION:
         return
     async with pool.acquire() as conn:
+        # Always set search_path first — Neon may not honor server_settings or init callbacks
+        await conn.execute(f"SET search_path TO {SCHEMA}, public")
         # Quick check: does the workspaces table exist?
         exists = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
