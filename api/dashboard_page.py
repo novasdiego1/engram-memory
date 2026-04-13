@@ -1695,14 +1695,47 @@ async function renderGraph() {
   let pi = 0;
   const sColor = s => { if (!sc[s]) sc[s] = PAL[pi++ % PAL.length]; return sc[s]; };
 
+  // Lighten a hex color by mixing toward white — used for the star gradient centre
+  function starCore(hex) {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    const mix = 0.72;
+    const lr = Math.round(r+(255-r)*mix), lg = Math.round(g+(255-g)*mix), lb = Math.round(b+(255-b)*mix);
+    return '#'+[lr,lg,lb].map(v=>v.toString(16).padStart(2,'0')).join('');
+  }
+
   (facts||[]).forEach(f => {
     const ret = !!f.valid_until;
     const col = ret ? '#64748b' : sColor(f.scope||'general');
-    els.push({data:{id:f.id, label:f.scope||'general', content:f.content, scope:f.scope,
+    els.push({data:{id:f.id, label:'', content:f.content, scope:f.scope,
       fact_type:f.fact_type, committed_at:f.committed_at, durability:f.durability, retired:ret,
-      color: col, glow: col,
-      size: ret ? 20 : Math.max(22, (f.confidence||0.9)*40+14)}});
+      color: col, coreColor: ret ? '#94a3b8' : starCore(col),
+      size: ret ? 16 : Math.max(20, (f.confidence||0.9)*32+12)}});
   });
+
+  // Same-scope edges — pull related facts together into clusters
+  const byScope = {};
+  (facts||[]).filter(f=>!f.valid_until).forEach(f => {
+    const s = f.scope||'general';
+    (byScope[s] = byScope[s]||[]).push(f.id);
+  });
+  const edgeSet = new Set();
+  Object.entries(byScope).forEach(([s, ids]) => {
+    // Fully connect groups ≤ 6, star-connect larger ones
+    if (ids.length <= 6) {
+      for (let i=0; i<ids.length; i++)
+        for (let j=i+1; j<ids.length; j++) {
+          const k = ids[i]+'|'+ids[j];
+          if (!edgeSet.has(k)) { edgeSet.add(k); els.push({data:{id:'s-'+k, source:ids[i], target:ids[j], kind:'scope', color: sColor(s)}}); }
+        }
+    } else {
+      // Star: connect everything to the first node
+      for (let i=1; i<ids.length; i++) {
+        const k = ids[0]+'|'+ids[i];
+        if (!edgeSet.has(k)) { edgeSet.add(k); els.push({data:{id:'s-'+k, source:ids[0], target:ids[i], kind:'scope', color: sColor(s)}}); }
+      }
+    }
+  });
+
   (facts||[]).filter(f=>f.supersedes_fact_id).forEach(f => {
     els.push({data:{id:'l-'+f.id, source:f.supersedes_fact_id, target:f.id, kind:'lineage'}});
   });
@@ -1715,82 +1748,84 @@ async function renderGraph() {
     container: document.getElementById('cy'), elements: els,
     style: [
       {selector:'node', style:{
-        'background-color':'data(color)',
-        'background-opacity': 0.92,
-        'label':'data(label)',
-        'font-size':'10px',
-        'color':'rgba(203,213,225,0.9)',
-        'text-valign':'bottom',
-        'text-margin-y':'6px',
+        'background-fill': 'radial-gradient',
+        'background-gradient-stop-colors': 'data(coreColor) data(color)',
+        'background-gradient-stop-positions': '20% 100%',
+        'background-opacity': 1,
+        'label': '',
         'width':'data(size)',
         'height':'data(size)',
-        'border-width': 2,
-        'border-color':'data(color)',
-        'border-opacity': 0.35,
+        'border-width': 0,
         'overlay-opacity': 0,
-        'shadow-blur': 18,
+        'shadow-blur': 28,
         'shadow-color':'data(color)',
-        'shadow-opacity': 0.55,
+        'shadow-opacity': 0.75,
         'shadow-offset-x': 0,
         'shadow-offset-y': 0,
-        'transition-property': 'background-color, border-color, border-width, opacity, width, height, shadow-opacity',
-        'transition-duration': '0.3s',
+        'transition-property': 'shadow-opacity, shadow-blur, width, height, opacity',
+        'transition-duration': '0.35s',
       }},
-      {selector:'node:active', style:{
-        'overlay-opacity': 0,
-      }},
+      {selector:'node:active', style:{'overlay-opacity': 0}},
       {selector:'node[retired = true]', style:{
-        'opacity':0.3,
-        'border-color':'rgba(255,255,255,0.06)',
-        'shadow-opacity': 0.1,
+        'opacity': 0.28,
+        'shadow-opacity': 0.08,
+      }},
+      {selector:'edge[kind="scope"]', style:{
+        'line-color':'data(color)',
+        'curve-style':'bezier',
+        'width': 1,
+        'opacity': 0.28,
+        'line-style': 'solid',
+        'overlay-opacity': 0,
+        'transition-property': 'opacity',
+        'transition-duration': '0.3s',
       }},
       {selector:'edge[kind="lineage"]', style:{
         'line-color':'#a78bfa',
         'target-arrow-color':'#a78bfa',
         'target-arrow-shape':'triangle',
         'curve-style':'bezier',
-        'width':1.5,
-        'opacity':0.45,
+        'width': 1.5,
+        'opacity': 0.5,
         'line-style':'dotted',
-        'transition-property': 'opacity, line-color',
+        'transition-property': 'opacity',
         'transition-duration': '0.3s',
       }},
       {selector:'edge[kind="conflict"]', style:{
         'line-color':'#f87171',
-        'line-style':'dashed',
-        'width':2,
-        'opacity':0.65,
+        'line-style':'solid',
+        'width': 1.8,
+        'opacity': 0.65,
         'curve-style':'bezier',
         'transition-property': 'opacity',
         'transition-duration': '0.3s',
       }},
       {selector:':selected', style:{
-        'border-color':'#34d399',
-        'border-width':3,
-        'border-opacity': 1,
-        'background-opacity': 1,
-        'shadow-opacity': 0.85,
+        'shadow-blur': 48,
+        'shadow-opacity': 1,
+        'width': 'mapData(size, 16, 52, 26, 62)',
+        'height': 'mapData(size, 16, 52, 26, 62)',
       }},
       {selector:'node.hover-neighbor', style:{
-        'border-color':'rgba(52,211,153,0.6)',
-        'border-width':2.5,
-        'border-opacity': 1,
-        'background-opacity': 1,
-        'shadow-opacity': 0.7,
+        'shadow-blur': 36,
+        'shadow-opacity': 0.9,
       }},
       {selector:'node.dimmed', style:{'opacity':0.07}},
       {selector:'edge.dimmed', style:{'opacity':0.03}},
+      {selector:'edge.hover-edge', style:{'opacity':0.7, 'width':1.8}},
     ],
     layout:{
-      name: (facts||[]).length < 40 ? 'cose' : 'random',
+      name: (facts||[]).length < 60 ? 'cose' : 'random',
       animate: true,
-      animationDuration: 800,
+      animationDuration: 900,
       animationEasing: 'ease-out-cubic',
       randomize: false,
-      nodeRepulsion: 10000,
-      idealEdgeLength: 140,
-      padding: 30,
-      nodeOverlap: 20,
+      nodeRepulsion: 8500,
+      idealEdgeLength: e => e.data('kind') === 'scope' ? 65 : 150,
+      edgeElasticity: e => e.data('kind') === 'scope' ? 0.55 : 0.25,
+      padding: 36,
+      nodeOverlap: 16,
+      gravity: 0.25,
     },
     wheelSensitivity: 0.3,
     minZoom: 0.3,
@@ -1800,16 +1835,15 @@ async function renderGraph() {
   // Hover glow effect
   cy.on('mouseover','node', e => {
     const n = e.target;
-    n.style({'border-color':'rgba(52,211,153,0.9)', 'border-width':3, 'border-opacity':1,
-             'background-opacity':1, 'shadow-opacity':0.9});
+    n.style({'shadow-blur':52, 'shadow-opacity':1});
     n.neighborhood('node').addClass('hover-neighbor');
-    cy.elements().not(n).not(n.neighborhood()).addClass('dimmed');
+    n.connectedEdges().addClass('hover-edge');
+    cy.elements().not(n).not(n.neighborhood()).not(n.connectedEdges()).addClass('dimmed');
   });
   cy.on('mouseout','node', e => {
     const n = e.target;
-    n.style({'border-color': n.data('color'), 'border-width':2, 'border-opacity':0.35,
-             'background-opacity':0.92, 'shadow-opacity':0.55});
-    cy.elements().removeClass('hover-neighbor').removeClass('dimmed');
+    n.style({'shadow-blur':28, 'shadow-opacity':0.75});
+    cy.elements().removeClass('hover-neighbor').removeClass('dimmed').removeClass('hover-edge');
   });
 
   // Click detail panel
@@ -1827,14 +1861,14 @@ async function renderGraph() {
   });
   cy.on('tap', e => { if(e.target===cy) document.getElementById('node-detail').style.display='none'; });
 
-  // Subtle idle animation — gentle breathing on nodes
+  // Star shimmer — gently pulse shadow opacity to simulate twinkling
   let breathPhase = 0;
   function breathe() {
-    breathPhase += 0.02;
+    breathPhase += 0.018;
     cy.nodes('[retired != true]').forEach((n, i) => {
-      const s = 1 + Math.sin(breathPhase + i * 0.3) * 0.03;
-      const base = n.data('size') || 24;
-      n.style({'width': base * s, 'height': base * s});
+      const glow = 0.6 + Math.sin(breathPhase + i * 0.55) * 0.18;
+      const blur = 24 + Math.sin(breathPhase + i * 0.55) * 6;
+      n.style({'shadow-opacity': glow, 'shadow-blur': blur});
     });
     requestAnimationFrame(breathe);
   }
