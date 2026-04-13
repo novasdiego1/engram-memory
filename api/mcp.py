@@ -173,11 +173,11 @@ async def _get_pool() -> Any:
         conn = await asyncpg.connect(DB_URL)
         try:
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
-            await conn.execute(f"SET search_path TO {SCHEMA}, public")
-            # Execute each statement individually — most reliable across providers
+            # Prefix every statement with search_path to ensure it sticks
             for stmt in _SCHEMA_SQL.split(";"):
                 stmt = stmt.strip()
                 if stmt:
+                    await conn.execute(f"SET search_path TO {SCHEMA}, public")
                     await conn.execute(stmt)
             # Verify critical tables exist
             check = await conn.fetchval(
@@ -186,7 +186,9 @@ async def _get_pool() -> Any:
                 SCHEMA,
             )
             if not check:
-                raise RuntimeError("Schema bootstrap completed but workspaces table not found")
+                raise RuntimeError(
+                    f"Schema bootstrap completed but workspaces table not found in schema '{SCHEMA}'"
+                )
             _schema_version_applied = _SCHEMA_VERSION
         except Exception as exc:
             logger.error("Schema bootstrap failed: %s", exc)
