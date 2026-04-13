@@ -609,12 +609,28 @@ def _render_landing() -> str:
   <!-- Install -->
   <div class="card reveal" id="install">
     <div class="section-label">Get started</div>
-    <div class="section-title">One command. Zero config.</div>
-    <div class="section-desc">Install Engram, restart your IDE, and ask your agent to set up your team. That's it.</div>
+    <div class="section-title">Up and running in minutes.</div>
+    <div class="section-desc">Create an account, run the installer, and ask your agent to finish setup. That's it.</div>
 
     <div class="install-steps">
       <div class="install-step">
         <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Create an account</div>
+          <div class="step-desc" style="margin-top:8px;font-size:14px;color:var(--t2);line-height:1.6;">
+            Sign up at the dashboard, then create a new workspace or join an existing one with an invite key from a teammate.
+          </div>
+          <a href="/dashboard" class="btn-step-cta" style="display:inline-block;margin-top:12px;
+            padding:9px 20px;background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);
+            border-radius:9px;color:var(--em4);font-size:13px;font-weight:600;text-decoration:none;
+            transition:background 0.2s;" onmouseover="this.style.background='rgba(52,211,153,0.18)'"
+            onmouseout="this.style.background='rgba(52,211,153,0.1)'">
+            Sign up at engram-memory.com →
+          </a>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">2</div>
         <div class="step-content">
           <div class="step-title">Run the installer</div>
           <div class="platform-tabs">
@@ -637,13 +653,13 @@ def _render_landing() -> str:
         </div>
       </div>
       <div class="install-step">
-        <div class="step-num">2</div>
+        <div class="step-num">3</div>
         <div class="step-content">
           <div class="step-title">Restart your IDE</div>
         </div>
       </div>
       <div class="install-step">
-        <div class="step-num">3</div>
+        <div class="step-num">4</div>
         <div class="step-content">
           <div class="step-title">Ask your agent</div>
           <div class="code-block">

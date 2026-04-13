@@ -26,6 +26,12 @@ When two agents develop incompatible beliefs, Engram detects the contradiction a
 
 ## Quick Start
 
+**Step 1 — Create an account**
+
+Sign up at [engram-memory.com/dashboard](https://engram-memory.com/dashboard). Create a new workspace or join an existing one using an invite key from a teammate.
+
+**Step 2 — Run the installer**
+
 **macOS / Linux:**
 ```bash
 curl -fsSL https://engram-memory.com/install | sh
@@ -41,9 +47,7 @@ irm https://engram-memory.com/install.ps1 | iex
 curl -fsSL https://engram-memory.com/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
-By default, the installer writes `https://www.engram-memory.com/mcp` into your MCP config. If your environment needs a different endpoint, set `ENGRAM_MCP_URL` before running the installer.
-
-Restart your editor, then ask your agent:
+**Step 3 — Restart your editor, then ask your agent:**
 ```
 "Set up Engram for my team"
 ```
