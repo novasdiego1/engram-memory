@@ -21,7 +21,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 9
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -129,31 +129,6 @@ MIGRATIONS: dict[int, list[str]] = {
         # Workspace display name and description (issue #64)
         "ALTER TABLE workspaces ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE workspaces ADD COLUMN description TEXT NOT NULL DEFAULT ''",
-    ],
-    10: [
-        # SQLite FTS5 update trigger for GDPR hard-erase path.
-        # facts_fts uses external-content mode (content=facts), so UPDATE
-        # statements on content/keywords do not automatically refresh the index.
-        # This trigger keeps the shadow table consistent by deleting the old
-        # entry and re-inserting the new one in a single statement group.
-        # Postgres uses a GENERATED tsvector column, so no migration is needed there.
-        """CREATE TRIGGER IF NOT EXISTS facts_au
-           AFTER UPDATE OF content, scope, keywords ON facts BEGIN
-               INSERT INTO facts_fts(facts_fts, rowid, content, scope, keywords)
-               VALUES ('delete', old.rowid, old.content, old.scope, old.keywords);
-               INSERT INTO facts_fts(rowid, content, scope, keywords)
-               VALUES (new.rowid, new.content, new.scope, new.keywords);
-           END""",
-    ],
-    11: [
-        # Invite key lifecycle: soft-revocation with grace period for active sessions.
-        # revoked_at: set when a key rotation is triggered; NULL = still active.
-        # grace_until: existing sessions may continue until this timestamp.
-        # rotation_reason: optional operator note stored at revocation time.
-        "ALTER TABLE invite_keys ADD COLUMN revoked_at TEXT",
-        "ALTER TABLE invite_keys ADD COLUMN grace_until TEXT",
-        "ALTER TABLE invite_keys ADD COLUMN rotation_reason TEXT",
-        "CREATE INDEX IF NOT EXISTS invite_keys_grace ON invite_keys(engram_id, grace_until)",
     ],
 }
 

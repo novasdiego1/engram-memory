@@ -1,43 +1,63 @@
 # Engram Pricing & Usage Tiers
 
-All plans include LLM suggestions, conflict detection (forgetting-based), and the full MCP toolset. Plans differ only by monthly commit volume.
+## Free Tier Limits
 
-## Tiers
+The free tier is designed for individual developers and small teams to get started with Engram.
 
-| Tier    | Price   | Commits/mo | Overage          |
-|---------|---------|------------|------------------|
-| Free    | $0      | 500        | Workspace paused |
-| Builder | $12/mo  | 5,000      | $0.015/commit    |
-| Team    | $39/mo  | 25,000     | $0.015/commit    |
-| Scale   | $99/mo  | 100,000    | $0.015/commit    |
+| Resource | Free Tier Limit |
+|----------|----------------|
+| Facts (total) | 1,000 |
+| Agents | 3 |
+| API requests/month | 10,000 |
+| Storage | 100 MB |
+| Invite links | 1 |
 
-## What counts as a commit?
+## Paid Tiers
 
-Every call to `engram_commit` (including duplicates that are deduplicated, and facts that are later forgotten by the detective's forgetting curve) counts toward the monthly limit. The `operation="none"` no-op does not count.
+### Pro ($19/month)
+- Facts: 50,000
+- Agents: 20
+- API requests/month: 100,000
+- Storage: 5 GB
+- Priority support
 
-## Features included on all plans
+### Team ($49/month)
+- Facts: 200,000
+- Agents: 100
+- API requests/month: 500,000
+- Storage: 25 GB
+- Advanced analytics
+- Custom scopes
 
-- MCP server (stdio + HTTP)
-- Conflict detection (entity, NLI, narrative coherence)
-- LLM suggestions for conflict resolution
-- Forgetting-based memory management
-- Dashboard at engram-memory.com/dashboard
-- Invite key-based team joining
+### Enterprise (Custom pricing)
+- Unlimited facts
+- Unlimited agents
+- Unlimited API calls
+- Unlimited storage
+- SSO/SAML
+- Dedicated support
+- SLA guarantee
 
 ## In-Product Upgrade Prompts
 
 When users approach their limits, Engram displays contextual upgrade prompts:
 
-### Commit Limit Warning
+### Fact Limit Warning
 ```
-⚠ You've used 450/500 commits (90%)
-Upgrade to Builder for 5,000 commits/mo → [Upgrade Now]
+⚠ You've used 900/1,000 facts (90%)
+Upgrade to Pro for 50,000 facts → [Upgrade Now]
 ```
 
-### Workspace Paused (free tier)
+### Agent Limit Warning
 ```
-⚠ Workspace paused — 500 commits/month limit reached
-Upgrade at https://www.engram-memory.com/dashboard to continue.
+⚠ You've added 3/3 agents (100%)
+Upgrade to Pro for 20 agents → [Upgrade Now]
+```
+
+### Rate Limit Warning
+```
+⚠ Rate limit reached (10,000/month)
+Upgrade to Pro for 100k requests/month → [Upgrade Now]
 ```
 
 ## Checking Your Usage
@@ -45,12 +65,14 @@ Upgrade at https://www.engram-memory.com/dashboard to continue.
 ```bash
 # Check current usage
 engram stats --json
+
+# Check workspace limits
+engram config show
 ```
 
 ## Implementation Notes
 
-- Usage is tracked per workspace per calendar month
-- Free tier pauses the workspace when the limit is reached
-- Paid tiers allow overage at $0.015/commit above the limit
-- Stripe handles subscriptions and metered billing
-- Legacy plan names (`hobby` → `free`, `pro` → `builder`) are aliased automatically
+- Usage is tracked per workspace
+- Limits are enforced at the API level
+- Upgrade prompts appear in dashboard and CLI
+- Hard limits return 429 status with upgrade URL

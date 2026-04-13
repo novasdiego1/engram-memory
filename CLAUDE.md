@@ -112,5 +112,4 @@ All source lives under `src/engram/`.
 - `AGENTS.md` — Universal AI assistant guidance
 - `HIRING.md` — Paid contract opportunities ($125-185/hour)
 - `docs/IMPLEMENTATION.md` — Architecture and phase delivery plan
-- `docs/MIGRATION_SCHEMA.md` — Database migration guide (current: v11)
-- `docs/PRIVACY_ARCHITECTURE.md` — GDPR erasure, anonymous mode, zero-knowledge design, invite key lifecycle
+- `docs/MIGRATION_SCHEMA.md` — Database migration guide

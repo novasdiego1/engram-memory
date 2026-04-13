@@ -1282,69 +1282,22 @@ def _render_settings(workspace_info: dict | None) -> str:
 
     display_name = workspace_info.get("display_name", "")
     description = workspace_info.get("description", "")
-    is_creator = workspace_info.get("is_creator", False)
-    rename_error = workspace_info.get("rename_error")
-    rename_success = workspace_info.get("rename_success", False)
-
-    if is_creator:
-        success_banner = ""
-        if rename_success:
-            success_banner = """
-            <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;
-                        padding:0.6rem 0.9rem;margin-bottom:1rem;color:#166534;font-size:0.875rem;">
-                ✓ Workspace name updated successfully.
-            </div>"""
-        error_banner = ""
-        if rename_error:
-            error_banner = f"""
-            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;
-                        padding:0.6rem 0.9rem;margin-bottom:1rem;color:#991b1b;font-size:0.875rem;">
-                {_esc(rename_error)}
-            </div>"""
-        name_section = f"""
-    <div style="margin-bottom:2rem;padding:1.25rem;border:2px solid #6366f1;border-radius:10px;
-                background:#fafafa;">
-        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.25rem;">Workspace Name</h3>
-        <p style="font-size:0.8rem;color:#6b7280;margin-bottom:0.75rem;">
-            This name appears in the dashboard header and is visible to all workspace members.
-        </p>
-        {success_banner}{error_banner}
-        <form method="POST" action="/dashboard/settings/rename"
-              style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-            <input
-                type="text"
-                name="display_name"
-                value="{_esc(display_name)}"
-                placeholder="e.g. My Team's Workspace"
-                required
-                style="flex:1;min-width:200px;padding:0.5rem 0.75rem;border:1px solid #d1d5db;
-                       border-radius:6px;font-size:0.95rem;outline:none;"
-            />
-            <button type="submit"
-                    style="padding:0.5rem 1.25rem;background:#6366f1;color:#fff;border:none;
-                           border-radius:6px;font-size:0.95rem;cursor:pointer;font-weight:500;
-                           white-space:nowrap;">
-                Save Name
-            </button>
-        </form>
-    </div>"""
-    else:
-        name_section = f"""
-    <div style="margin-bottom:2rem;">
-        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Workspace Name</h3>
-        <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">
-            {_esc(display_name) or "(not set)"}
-        </code>
-        <p style="font-size:0.8rem;color:#6b7280;margin-top:0.4rem;">
-            Only the workspace creator can rename this workspace.
-        </p>
-    </div>"""
 
     body = f"""
     <h2>Workspace Settings</h2>
 
     {name_section}
 
+    <div style="margin-bottom:2rem;">
+        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Description</h3>
+        <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">{_esc(description) or "(not set)"}</code>
+    </div>
+    
+    <div style="margin-bottom:2rem;">
+        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Display Name</h3>
+        <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">{_esc(display_name) or "(not set)"}</code>
+    </div>
+    
     <div style="margin-bottom:2rem;">
         <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Description</h3>
         <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">{_esc(description) or "(not set)"}</code>

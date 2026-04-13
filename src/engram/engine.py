@@ -469,38 +469,6 @@ class EngramEngine:
 
         return results
 
-    # Adding helper function estimate_conflict_risk.
-    def _estimate_conflict_risk(self, content: str, scope: str) -> str:
-        """
-        Lightweight approximation to estimate likelihood of conflict
-        before async detection completes.
-        """
-
-        text = content.lower()
-
-        risk_keywords = [
-            "always",
-            "never",
-            "must",
-            "guaranteed",
-            "limit",
-            "rate",
-            "timeout",
-            "threshold",
-            "retry",
-            "should",
-            "fail",
-            "error",
-        ]
-
-        if any(char.isdigit() for char in text):
-            return "high"
-
-        if any(word in text for word in risk_keywords):
-            return "medium"
-
-        return "low"
-
     # ── engram_query ─────────────────────────────────────────────────
 
     async def query(

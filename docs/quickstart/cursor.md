@@ -75,21 +75,10 @@ engram verify
 
 **In your IDE:** Ask your agent: "Call engram_status and tell me what it returns."
 
-If Cursor searches the repository instead of calling a tool, use the more explicit
-prompt:
-
-```text
-Use the Engram MCP tool `engram_status`. Do not inspect files. Show the raw JSON response.
-```
-
 Expected output:
 ```
 {"status": "ready", "mode": "team", "engram_id": "ENG-XXXXXX", "schema": "engram"}
 ```
-
-If the workspace has not been configured yet, `engram_status` may instead return
-`status: "unconfigured"` with a `next_prompt`. That still confirms Cursor can
-call Engram.
 
 ## Troubleshooting
 
