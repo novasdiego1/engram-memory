@@ -92,7 +92,7 @@ def _read_engram_env() -> str | None:
     for line in env_path.read_text().splitlines():
         line = line.strip()
         if line.startswith("ENGRAM_INVITE_KEY="):
-            return line[len("ENGRAM_INVITE_KEY="):].strip()
+            return line[len("ENGRAM_INVITE_KEY=") :].strip()
     return None
 
 
@@ -171,7 +171,9 @@ async def _join_workspace(invite_key: str) -> dict[str, Any]:
     )
     write_workspace(config)
     _write_engram_env(invite_key)
-    logger.info("Joined workspace: %s (schema: %s, generation: %d)", engram_id, schema, key_generation)
+    logger.info(
+        "Joined workspace: %s (schema: %s, generation: %d)", engram_id, schema, key_generation
+    )
 
     return {
         "status": "joined",
