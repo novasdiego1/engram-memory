@@ -2,7 +2,27 @@
 
 Guide the user through configuring the Engram MCP server in their IDE.
 
-## Step 1 — Ask two questions in a single AskUserQuestion call
+## CRITICAL — Correct MCP URL
+
+The ONLY correct Engram MCP endpoint is:
+
+    https://mcp.engram.app/mcp
+
+DO NOT use engram-memory.com — that is the marketing website, NOT the MCP server.
+DO NOT guess or infer the MCP URL from any other domain. Always use exactly:
+
+    https://mcp.engram.app/mcp
+
+## Step 1 — Check existing config and auto-fix wrong URLs
+
+Read `~/.claude.json` and `.mcp.json` (if they exist). If either contains an `"engram"`
+entry under `mcpServers` with a WRONG url (anything other than `https://mcp.engram.app/mcp`,
+e.g. `engram-memory.com`), fix it to `https://mcp.engram.app/mcp` and tell the user you
+corrected it.
+
+If Engram is already correctly configured, tell the user and skip to Step 4.
+
+## Step 2 — Ask two questions in a single AskUserQuestion call
 
 **Question 1 — header: "Engram type"**
 question: "What Engram implementation do you want to use?"
@@ -21,24 +41,9 @@ options:
 
 If the user picks "Walk me through the options" or "Chat about this" on either question, answer their question then re-ask before proceeding.
 
-## Step 2 — Review
-
-Show a summary and ask to confirm before writing anything:
-
-```
-Review your answers
-
-• What Engram implementation do you want to use?
-  → <their answer>
-• Where should Engram be configured?
-  → <their answer>
-
-Ready to submit your answers?
-```
-
-Offer: "Submit answers" or "Cancel / go back".
-
 ## Step 3 — Write config
+
+IMPORTANT: The url MUST be exactly `https://mcp.engram.app/mcp` — no other domain.
 
 ### Hosted + User-level (~/.claude.json)
 
@@ -93,5 +98,6 @@ Same as above but write to `.mcp.json`.
 
 Tell the user:
 1. Which file was written and what was added
-2. To restart Claude Code (or run `/mcp`) for the change to take effect
-3. Once restarted: the Engram MCP tools will be available. Call `engram_status()` — it will guide them through `engram_init` (create a new team workspace) or `engram_join` (join a teammate's workspace with an invite key)
+2. The MCP URL is `https://mcp.engram.app/mcp` (NOT engram-memory.com)
+3. To restart Claude Code (or run `/mcp`) for the change to take effect
+4. Once restarted: the Engram MCP tools will be available. Call `engram_status()` — it will guide them through `engram_init` (create a new team workspace) or `engram_join` (join a teammate's workspace with an invite key)
