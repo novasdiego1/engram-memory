@@ -533,7 +533,6 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
     if result["status"] != "joined":
         return result
 
-    engram_id = result["engram_id"]
     schema = result["schema"]
     return {
         **result,
