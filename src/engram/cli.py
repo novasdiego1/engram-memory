@@ -285,6 +285,56 @@ def _write_claude_code_hook(dry_run: bool) -> bool:
     return True
 
 
+# ── Kiro promptSubmit hook ────────────────────────────────────────────
+# This hook fires at the IDE level for every user message — before the LLM
+# processes it. It auto-commits the raw user message to Engram via the REST
+# API using Kiro's $USER_PROMPT env var, regardless of whether the LLM
+# remembers to call engram_commit.
+
+_KIRO_HOOK = {
+    "name": "Engram Auto-Commit",
+    "version": "1.0.0",
+    "description": "Commits every user message to Engram shared team memory before the agent responds. Required by Engram ToS.",
+    "when": {
+        "type": "promptSubmit"
+    },
+    "then": {
+        "type": "runCommand",
+        "command": (
+            "source .engram.env 2>/dev/null || true; "
+            "INVITE_KEY=\"${ENGRAM_INVITE_KEY}\"; "
+            "SERVER=\"${ENGRAM_SERVER_URL:-https://www.engram-memory.com}\"; "
+            "PROMPT_ESCAPED=$(echo \"${USER_PROMPT}\" | python3 -c \"import json,sys; print(json.dumps(sys.stdin.read().strip()))\"); "
+            "curl -s -X POST \"$SERVER/api/commit\" "
+            "-H \"Authorization: Bearer $INVITE_KEY\" "
+            "-H \"Content-Type: application/json\" "
+            "-d \"{\\\"content\\\": $PROMPT_ESCAPED, \\\"scope\\\": \\\"general\\\", \\\"confidence\\\": 0.8, \\\"fact_type\\\": \\\"observation\\\"}\" "
+            "> /dev/null 2>&1 || true"
+        ),
+    },
+}
+
+
+def _write_kiro_hook(project_dir: Path, dry_run: bool) -> bool:
+    """Write the Engram promptSubmit hook to .kiro/hooks/ in the project directory.
+
+    Returns True if the hook was written (or would be in dry-run mode).
+    """
+    hooks_dir = project_dir / ".kiro" / "hooks"
+    hook_path = hooks_dir / "engram-autocommit.json"
+
+    if dry_run:
+        click.echo(f"[dry-run] Would write Kiro hook to {hook_path}")
+        return True
+
+    try:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_path.write_text(json.dumps(_KIRO_HOOK, indent=2) + "\n")
+        return True
+    except Exception:
+        return False
+
+
 # Map of IDE name → list of (file_path, content_or_callable) for steering.
 # Paths are relative to the user's home directory or absolute.
 # We only write to IDEs that were detected (config file exists).
@@ -441,6 +491,9 @@ def install(dry_run: bool) -> None:
     # at the shell level, independent of what the LLM does)
     hook_written = _write_claude_code_hook(dry_run)
 
+    # Write the Kiro promptSubmit hook to the current project directory
+    kiro_hook_written = _write_kiro_hook(Path.cwd(), dry_run)
+
     if added:
         click.echo(f"✓ Engram added to: {', '.join(added)}")
     if skipped:
@@ -449,6 +502,8 @@ def install(dry_run: bool) -> None:
         click.echo(f"📝 Agent instructions written to: {', '.join(steering_written)}")
     if hook_written:
         click.echo("⚡ Auto-commit hook installed: every Claude Code message → Engram")
+    if kiro_hook_written:
+        click.echo("⚡ Auto-commit hook installed: every Kiro message → Engram")
 
     if added:
         click.echo("\n→ Restart your editor and ask your agent: 'Set up Engram for my team'")
