@@ -42,7 +42,6 @@ _PLAN_LIMITS: dict[str, int] = {
     "hobby": 500,
     "pro": 5_000,
 }
-_PLANS_WITH_SUGGESTIONS = {"builder", "team", "scale", "pro"}
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -141,7 +140,7 @@ CREATE TABLE IF NOT EXISTS agents (
 -- Billing / quota columns on workspaces
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS paused         BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS storage_bytes  BIGINT  NOT NULL DEFAULT 0;
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan           TEXT    NOT NULL DEFAULT 'hobby';
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan           TEXT    NOT NULL DEFAULT 'free';
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS terms_accepted BOOLEAN NOT NULL DEFAULT false;
 

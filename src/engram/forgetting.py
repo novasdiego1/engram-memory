@@ -51,7 +51,7 @@ def compute_keep_probability(
     else:
         base_keep = 0.07  # keep 5-10%, center at 7%
 
-    return min(1.0, base_keep * (2.0 ** flag_count))
+    return min(1.0, base_keep * (2.0**flag_count))
 
 
 def apply_forgetting(

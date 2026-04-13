@@ -293,7 +293,7 @@ def _render_dashboard() -> str:
     .badge-active { background: rgba(52,211,153,0.1); color: var(--em4); }
     .badge-paused { background: rgba(239,68,68,0.15); color: var(--red); }
     .badge-pro { background: rgba(56,189,248,0.1); color: var(--blue); }
-    .badge-hobby { background: rgba(167,243,208,0.08); color: var(--tm); }
+    .badge-free { background: rgba(167,243,208,0.08); color: var(--tm); }
     .ws-usage-bar { height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px;
       overflow: hidden; margin-bottom: 8px; }
     .ws-usage-fill { height: 100%; border-radius: 2px; background: var(--em5);
@@ -532,6 +532,30 @@ def _render_dashboard() -> str:
     .billing-row .value.green { color: var(--em4); }
     .billing-row .value.red { color: var(--red); }
     .pricing-note { font-size: 12px; color: var(--tm); margin-top: 12px; line-height: 1.6; }
+    /* Plan badge */
+    .plan-badge { display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .plan-badge-free { background: rgba(255,255,255,0.06); color: var(--t2); }
+    .plan-badge-builder { background: rgba(52,211,153,0.12); color: var(--em4); }
+    .plan-badge-team { background: rgba(96,165,250,0.12); color: #60a5fa; }
+    .plan-badge-scale { background: rgba(167,139,250,0.12); color: #a78bfa; }
+    /* Plan grid */
+    .plan-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    @media (max-width: 700px) { .plan-grid { grid-template-columns: repeat(2,1fr); } }
+    .plan-card { padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);
+      background: rgba(255,255,255,0.015); display: flex; flex-direction: column; gap: 6px; }
+    .plan-card-current { border-color: var(--em5); background: rgba(16,185,129,0.05); }
+    .plan-card-name { font-size: 13px; font-weight: 700; color: var(--t1); }
+    .plan-card-price { font-size: 22px; font-weight: 800; color: var(--t1); line-height: 1; }
+    .plan-card-price span { font-size: 12px; font-weight: 400; color: var(--tm); }
+    .plan-card-commits { font-size: 12px; color: var(--t2); font-family: 'JetBrains Mono', monospace; }
+    .plan-card-feature { font-size: 11px; margin-top: 2px; }
+    .plan-card-feature.yes { color: var(--em4); }
+    .plan-card-feature.no { color: rgba(255,255,255,0.2); }
+    .plan-card-label { font-size: 11px; color: var(--em4); font-weight: 600;
+      margin-top: auto; padding-top: 8px; }
+    .plan-upgrade-btn { width: 100%; margin-top: auto; padding: 7px 0 !important;
+      font-size: 12px !important; }
 
     @media (max-width: 768px) {
       .container { padding: 0 16px; }
@@ -780,7 +804,7 @@ def _render_dashboard() -> str:
     <div class="paused-banner" id="paused-banner" style="display:none">
       <div class="paused-banner-text">
         <strong>Workspace paused — free tier limit reached</strong>
-        <span>Your workspace has exceeded the 512 MB free storage limit. Add a payment method to resume.</span>
+        <span>Your workspace has exceeded the 500 commits/month free tier limit. Upgrade your plan to resume.</span>
       </div>
       <button class="btn-sm btn-primary" onclick="startCheckout()">Add payment method</button>
     </div>
@@ -1966,71 +1990,76 @@ async function loadBilling(engram_id) {
 
 function renderBilling(b) {
   const el = document.getElementById('billing-section');
-  const pct = b.usage_pct || 0;
+  const plan = b.plan || 'free';
+  const planName = b.plan_name || 'Free';
+  const used = b.commits_this_month || 0;
+  const limit = b.commit_limit || 500;
+  const pct = Math.min(100, used / limit * 100);
   const fillClass = pct >= 100 ? 'over' : pct >= 80 ? 'near' : '';
-  const storageMib = b.storage_mib || 0;
-  const charge = b.estimated_monthly_usd || 0;
-  const hasPayment = b.has_payment_method;
   const isPaused = b.paused;
+  const hasSubscription = b.has_subscription;
+  const suggestionsOn = b.suggestions_enabled;
+  const badgeClass = `plan-badge plan-badge-${plan}`;
+
+  const planDefs = [
+    { key:'free',    name:'Free',    price:'$0',  commits:'500',     suggestions:false },
+    { key:'builder', name:'Builder', price:'$12', commits:'5,000',   suggestions:true  },
+    { key:'team',    name:'Team',    price:'$39', commits:'25,000',  suggestions:true  },
+    { key:'scale',   name:'Scale',   price:'$99', commits:'100,000', suggestions:true  },
+  ];
 
   el.innerHTML = `
     <div class="billing-card">
-      <h3>Storage Usage</h3>
-      <div class="usage-numbers">
-        <span>${storageMib.toFixed(2)} MB used</span>
-        <span>512 MB free</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">Commit Usage</h3>
+        <span class="${badgeClass}">${planName}</span>
       </div>
-      <div class="usage-bar-lg"><div class="usage-fill-lg ${fillClass}" style="width:${Math.min(100,pct)}%"></div></div>
-      <div style="font-size:13px;color:var(--tm)">${pct.toFixed(1)}% of free tier used</div>
-      <p class="pricing-note">
-        Free tier: <strong>512 MB</strong> &nbsp;·&nbsp; Paid tier: <strong>$${b.price_per_gib_month}/GiB-month</strong>
-      </p>
+      <div class="usage-numbers">
+        <span><strong style="color:var(--t1)">${used.toLocaleString()}</strong> commits used this month</span>
+        <span>${limit.toLocaleString()} limit</span>
+      </div>
+      <div class="usage-bar-lg"><div class="usage-fill-lg ${fillClass}" style="width:${pct.toFixed(1)}%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--tm)">
+        <span>${pct.toFixed(1)}% of monthly limit</span>
+        <span>LLM suggestions: <strong style="color:${suggestionsOn ? 'var(--em4)' : 'rgba(255,255,255,0.25)'}">${suggestionsOn ? 'included' : 'not included'}</strong></span>
+      </div>
+      ${isPaused ? `<div style="margin-top:14px;padding:12px 14px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);border-radius:8px;color:var(--red);font-size:13px">
+        Workspace paused — limit reached or payment issue. Upgrade or check billing below.
+      </div>` : ''}
     </div>
 
     <div class="billing-card">
-      <h3>Subscription</h3>
-      <div class="billing-row">
-        <span class="label">Plan</span>
-        <span class="value">${b.plan || 'hobby'}</span>
+      <h3>Plans</h3>
+      <div class="plan-grid">
+        ${planDefs.map(p => `
+          <div class="plan-card ${p.key === plan ? 'plan-card-current' : ''}">
+            <div class="plan-card-name">${p.name}</div>
+            <div class="plan-card-price">${p.price}<span>/mo</span></div>
+            <div class="plan-card-commits">${p.commits} commits</div>
+            <div class="plan-card-feature ${p.suggestions ? 'yes' : 'no'}">${p.suggestions ? '✓ LLM conflicts' : '✗ LLM conflicts'}</div>
+            ${p.key === plan
+              ? '<div class="plan-card-label">Current plan</div>'
+              : p.key !== 'free'
+                ? `<button class="btn-sm btn-primary plan-upgrade-btn" onclick="startCheckout('${p.key}')">Upgrade</button>`
+                : '<div class="plan-card-feature no" style="margin-top:auto;padding-top:8px">—</div>'}
+          </div>`).join('')}
       </div>
-      <div class="billing-row">
-        <span class="label">Status</span>
-        <span class="value ${isPaused ? 'red' : 'green'}">${isPaused ? 'Paused' : 'Active'}</span>
-      </div>
-      <div class="billing-row">
-        <span class="label">Payment method</span>
-        <span class="value ${hasPayment ? 'green' : ''}">${hasPayment ? 'On file' : 'None'}</span>
-      </div>
-      <div class="billing-row">
-        <span class="label">Est. monthly charge</span>
-        <span class="value">${charge === 0 ? '$0.00 (free tier)' : '$' + charge.toFixed(4)}</span>
-      </div>
-      ${isPaused ? `
-        <div style="margin-top:16px">
-          <button class="btn-sm btn-primary" style="width:100%;padding:12px" onclick="startCheckout()">
-            Add payment method to resume workspace
-          </button>
-        </div>` : hasPayment ? `
-        <div style="margin-top:16px">
-          <button class="btn-sm btn-ghost" style="width:100%" onclick="openPortal()">
-            Manage billing in Stripe portal
-          </button>
-        </div>` : pct >= 80 ? `
-        <div style="margin-top:16px">
-          <button class="btn-sm btn-ghost" style="width:100%" onclick="startCheckout()">
-            Add payment method (before limit reached)
-          </button>
-        </div>` : ''}
-    </div>`;
+      ${b.overage_price_per_commit ? `<p class="pricing-note">Paid plans: overage billed at <strong>$${b.overage_price_per_commit}/commit</strong> above monthly limit.</p>` : ''}
+    </div>
+
+    ${hasSubscription ? `
+    <div class="billing-card" style="padding:16px 24px">
+      <button class="btn-sm btn-ghost" onclick="openPortal()">Manage subscription in Stripe portal →</button>
+    </div>` : ''}`;
 }
 
-async function startCheckout() {
+async function startCheckout(plan) {
   if (!CURRENT_WS) return;
   try {
     const r = await fetch('/billing/checkout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ engram_id: CURRENT_WS.engram_id }),
+      body: JSON.stringify({ engram_id: CURRENT_WS.engram_id, plan: plan || 'builder' }),
     });
     const d = await r.json();
     if (!r.ok) { alert(d.error || 'Checkout failed'); return; }

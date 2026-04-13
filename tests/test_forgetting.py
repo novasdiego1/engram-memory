@@ -78,9 +78,7 @@ class TestApplyForgetting:
         facts = [_make_fact("keep-me", hours_ago=200, now=now)]
         # Seed that would normally drop a 200h-old fact (7% keep)
         rng = random.Random(999)
-        result = apply_forgetting(
-            facts, {}, now=now, rng=rng, always_keep_ids={"keep-me"}
-        )
+        result = apply_forgetting(facts, {}, now=now, rng=rng, always_keep_ids={"keep-me"})
         assert len(result) == 1
         assert result[0]["id"] == "keep-me"
 
@@ -109,9 +107,7 @@ class TestApplyForgetting:
         trials = 5000
         for i in range(trials):
             rng = random.Random(i)
-            result = apply_forgetting(
-                facts, {}, now=now, rng=rng, min_survivors=0
-            )
+            result = apply_forgetting(facts, {}, now=now, rng=rng, min_survivors=0)
             if result:
                 survived += 1
         rate = survived / trials
@@ -126,9 +122,7 @@ class TestApplyForgetting:
         trials = 5000
         for i in range(trials):
             rng = random.Random(i)
-            result = apply_forgetting(
-                facts, {}, now=now, rng=rng, min_survivors=0
-            )
+            result = apply_forgetting(facts, {}, now=now, rng=rng, min_survivors=0)
             if result:
                 survived += 1
         rate = survived / trials
@@ -142,9 +136,7 @@ class TestApplyForgetting:
         trials = 5000
         for i in range(trials):
             rng = random.Random(i)
-            result = apply_forgetting(
-                facts, {}, now=now, rng=rng, min_survivors=0
-            )
+            result = apply_forgetting(facts, {}, now=now, rng=rng, min_survivors=0)
             if result:
                 survived += 1
         rate = survived / trials
@@ -166,9 +158,7 @@ class TestApplyForgetting:
                 facts, conflict_counts, now=now, rng=rng, min_survivors=0
             )
             rng2 = random.Random(i)
-            unflagged_result = apply_forgetting(
-                facts, {}, now=now, rng=rng2, min_survivors=0
-            )
+            unflagged_result = apply_forgetting(facts, {}, now=now, rng=rng2, min_survivors=0)
             if flagged_result:
                 survived_flagged += 1
             if unflagged_result:

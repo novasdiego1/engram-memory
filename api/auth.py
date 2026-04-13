@@ -41,7 +41,7 @@ _AUTH_SCHEMA_STMTS = [
         key_generation     INTEGER     NOT NULL DEFAULT 0,
         paused             BOOLEAN     NOT NULL DEFAULT false,
         storage_bytes      BIGINT      NOT NULL DEFAULT 0,
-        plan               TEXT        NOT NULL DEFAULT 'hobby',
+        plan               TEXT        NOT NULL DEFAULT 'free',
         stripe_customer_id TEXT,
         display_name       TEXT
     )""",

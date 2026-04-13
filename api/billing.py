@@ -2,10 +2,12 @@
 
 Plans
 ─────
-  free     :   500 commits/month  — $0     — no LLM suggestions
-  builder  :  5 000 commits/month — $12/mo — LLM suggestions included
-  team     : 25 000 commits/month — $39/mo — LLM suggestions included
-  scale    :100 000 commits/month — $99/mo — LLM suggestions included
+  free     :   500 commits/month  — $0
+  builder  :  5 000 commits/month — $12/mo
+  team     : 25 000 commits/month — $39/mo
+  scale    :100 000 commits/month — $99/mo
+
+All plans include LLM suggestions and the forgetting-based conflict detection.
 
 Overage (paid plans only): $0.015 / commit above tier limit, billed via
 Stripe metered item at period end.
@@ -47,28 +49,24 @@ PLANS: dict[str, dict] = {
         "name": "Free",
         "commits": 500,
         "price_usd": 0,
-        "suggestions": False,
         "desc": "Personal use",
     },
     "builder": {
         "name": "Builder",
         "commits": 5_000,
         "price_usd": 12,
-        "suggestions": True,
         "desc": "Solo developers",
     },
     "team": {
         "name": "Team",
         "commits": 25_000,
         "price_usd": 39,
-        "suggestions": True,
         "desc": "Small teams",
     },
     "scale": {
         "name": "Scale",
         "commits": 100_000,
         "price_usd": 99,
-        "suggestions": True,
         "desc": "Production",
     },
 }
@@ -97,10 +95,6 @@ def canonical_plan(plan: str | None) -> str:
 
 def plan_commit_limit(plan: str | None) -> int:
     return PLANS[canonical_plan(plan)]["commits"]
-
-
-def plan_suggestions_enabled(plan: str | None) -> bool:
-    return PLANS[canonical_plan(plan)]["suggestions"]
 
 
 async def _get_pool() -> Any:
@@ -206,7 +200,6 @@ async def handle_status(request: Request) -> JSONResponse:
             "commits_this_month": committed,
             "commit_limit": commit_limit,
             "usage_pct": usage_pct,
-            "suggestions_enabled": plan_info["suggestions"],
             "has_payment_method": bool(ws["stripe_customer_id"]),
             "has_subscription": bool(ws["stripe_subscription_id"]),
             "overage_price_per_commit": OVERAGE_PRICE_PER_COMMIT,
@@ -215,7 +208,6 @@ async def handle_status(request: Request) -> JSONResponse:
                     "name": v["name"],
                     "commits": v["commits"],
                     "price_usd": v["price_usd"],
-                    "suggestions": v["suggestions"],
                     "desc": v["desc"],
                 }
                 for k, v in PLANS.items()
