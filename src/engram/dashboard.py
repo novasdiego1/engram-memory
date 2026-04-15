@@ -1290,19 +1290,51 @@ def _render_settings(workspace_info: dict | None) -> str:
     </div>"""
 
     is_creator = workspace_info.get("is_creator", False)
-    delete_section = ""
     if is_creator:
         delete_section = """
-    <div style="margin-bottom:2rem;padding:1rem;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;">
-        <h3 style="font-size:1rem;color:#dc2626;margin-bottom:0.75rem;">Danger Zone</h3>
-        <p style="font-size:0.85rem;color:#991b1b;margin-bottom:1rem;">Deleting your workspace will permanently remove all facts, conflicts, and history. This cannot be undone.</p>
-        <form method="post" action="/dashboard/settings/delete"
-              onsubmit="return confirm('Delete this workspace and all its data? This cannot be undone.');">
-            <button type="submit" style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;
-                    padding:0.4rem 1rem;border-radius:4px;cursor:pointer;">
+    <div style="margin-bottom:2rem;border:2px solid #fca5a5;border-radius:8px;overflow:hidden;">
+        <div style="background:#fef2f2;padding:1rem 1.25rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+            <div>
+                <h3 style="font-size:1rem;color:#dc2626;margin-bottom:0.25rem;">Delete Workspace</h3>
+                <p style="font-size:0.85rem;color:#991b1b;margin:0;">Permanently removes all facts, conflicts, and history.</p>
+            </div>
+            <button type="button" onclick="document.getElementById('delete-confirm-panel').style.display='block';this.style.display='none';"
+                    style="background:#dc2626;color:#fff;border:none;padding:0.45rem 1.1rem;
+                           border-radius:4px;cursor:pointer;font-size:0.9rem;white-space:nowrap;">
                 Delete Workspace
             </button>
-        </form>
+        </div>
+        <div id="delete-confirm-panel" style="display:none;background:#fff1f2;border-top:2px solid #fca5a5;padding:1.25rem;">
+            <p style="font-size:0.95rem;font-weight:600;color:#b91c1c;margin-bottom:0.5rem;">
+                &#9888; This action cannot be undone.
+            </p>
+            <p style="font-size:0.85rem;color:#7f1d1d;margin-bottom:1rem;">
+                All facts, conflict history, invite keys, and agent records for this workspace
+                will be permanently deleted. There is no recovery option.
+            </p>
+            <div style="display:flex;gap:0.75rem;align-items:center;">
+                <form method="post" action="/dashboard/settings/delete">
+                    <button type="submit"
+                            style="background:#b91c1c;color:#fff;border:none;padding:0.45rem 1.1rem;
+                                   border-radius:4px;cursor:pointer;font-size:0.9rem;">
+                        Yes, permanently delete
+                    </button>
+                </form>
+                <button type="button"
+                        onclick="document.getElementById('delete-confirm-panel').style.display='none';
+                                 document.querySelector('[onclick*=delete-confirm-panel]').style.display='';"
+                        style="background:none;border:1px solid #9ca3af;color:#374151;padding:0.45rem 1rem;
+                               border-radius:4px;cursor:pointer;font-size:0.9rem;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>"""
+    else:
+        delete_section = """
+    <div style="margin-bottom:2rem;padding:1rem;background:#fef2f2;border:2px solid #fca5a5;border-radius:8px;">
+        <h3 style="font-size:1rem;color:#dc2626;margin-bottom:0.25rem;">Delete Workspace</h3>
+        <p style="font-size:0.85rem;color:#991b1b;margin:0;">Only the workspace creator can delete this workspace.</p>
     </div>"""
 
     body = f"""
