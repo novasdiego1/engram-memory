@@ -7,7 +7,6 @@ correctly settles disagreements — leaving only the winning fact active.
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
