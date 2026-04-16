@@ -9,19 +9,18 @@ Schema version 10 adds:
 - facts_au trigger for SQLite FTS5 consistency on content/keywords updates
   (required by the GDPR subject-erasure hard-erase path)
 
-Schema version 11 adds:
-- invite_keys.revoked_at: ISO timestamp of soft-revocation (NULL = active)
-- invite_keys.grace_until: ISO timestamp until which revoked keys still allow
-  existing sessions to continue (grace period for key rotation)
-- invite_keys.rotation_reason: optional human-readable reason for revocation
-- Index on (engram_id, grace_until) for efficient grace-period queries
+Schema version 13 adds:
+- conflicts.conflict_type: classification of detected conflicts as
+  'genuine' (cross-agent factual contradiction), 'evolution' (same-agent
+  self-correction), or 'ambiguous' (low-confidence or borderline case).
+  Enables downstream consumers to triage conflicts by signal quality.
 
 Two schemas are maintained:
 - SCHEMA_SQL: SQLite (local mode, aiosqlite)
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -182,6 +181,10 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_tkg_edges_active ON tkg_edges(expired_at)",
         "CREATE INDEX IF NOT EXISTS idx_tkg_edges_scope ON tkg_edges(scope)",
     ],
+    13: [
+        # Conflict type classification: genuine | evolution | ambiguous
+        "ALTER TABLE conflicts ADD COLUMN conflict_type TEXT NOT NULL DEFAULT 'genuine'",
+    ],
 }
 
 # ── SQLite schema (local mode) ───────────────────────────────────────
@@ -292,7 +295,8 @@ CREATE TABLE IF NOT EXISTS conflicts (
     suggestion_generated_at     TEXT,
     auto_resolved               INTEGER NOT NULL DEFAULT 0,
     escalated_at                TEXT,
-    workspace_id                TEXT NOT NULL DEFAULT 'local'
+    workspace_id                TEXT NOT NULL DEFAULT 'local',
+    conflict_type               TEXT NOT NULL DEFAULT 'genuine'
 );
 
 CREATE INDEX IF NOT EXISTS idx_conflicts_status    ON conflicts(status);
@@ -570,7 +574,8 @@ CREATE TABLE IF NOT EXISTS conflicts (
     suggestion_generated_at     TIMESTAMPTZ,
     auto_resolved               INTEGER NOT NULL DEFAULT 0,
     escalated_at                TIMESTAMPTZ,
-    workspace_id                TEXT NOT NULL DEFAULT 'local'
+    workspace_id                TEXT NOT NULL DEFAULT 'local',
+    conflict_type               TEXT NOT NULL DEFAULT 'genuine'
 );
 
 CREATE INDEX IF NOT EXISTS idx_conflicts_status    ON conflicts(status);

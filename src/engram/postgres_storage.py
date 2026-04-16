@@ -490,11 +490,13 @@ class PostgresStorage(BaseStorage):
             "explanation",
             "severity",
             "status",
+            "conflict_type",
             "workspace_id",
         ]
         placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
         col_names = ", ".join(cols)
-        values = [conflict.get(c, self.workspace_id if c == "workspace_id" else None) for c in cols]
+        _defaults = {"workspace_id": self.workspace_id, "conflict_type": "genuine"}
+        values = [conflict.get(c, _defaults.get(c)) for c in cols]
         async with self.acquire() as conn:
             await conn.execute(
                 f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders})", *values
@@ -1133,6 +1135,14 @@ class PostgresStorage(BaseStorage):
             )
             conflict_by_tier = {r["detection_tier"]: r["cnt"] for r in tier_rows}
 
+            # conflicts by type
+            type_conflict_rows = await conn.fetch(
+                "SELECT conflict_type, COUNT(*) AS cnt FROM conflicts "
+                "WHERE workspace_id = $1 GROUP BY conflict_type",
+                ws,
+            )
+            conflict_by_type = {r["conflict_type"]: r["cnt"] for r in type_conflict_rows}
+
             # agents
             agent_rows = await conn.fetch(
                 "SELECT agent_id, total_commits, flagged_commits FROM agents "
@@ -1171,6 +1181,7 @@ class PostgresStorage(BaseStorage):
                 "dismissed": conflict_by_status.get("dismissed", 0),
                 "total": sum(conflict_by_status.values()),
                 "by_tier": conflict_by_tier,
+                "by_type": conflict_by_type,
             },
             "agents": {
                 "total": total_agents,

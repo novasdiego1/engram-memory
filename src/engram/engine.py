@@ -1092,6 +1092,25 @@ class EngramEngine:
         except Exception:
             logger.debug("TKG ingestion failed for fact %s", fact_id[:12])
 
+    def _classify_conflict_type(
+        self, fact: dict[str, Any], other: dict[str, Any], nli_score: float | None = None
+    ) -> tuple[str, str]:
+        """Classify a detected conflict and choose a severity label.
+
+        Returns ``(conflict_type, severity)`` where *conflict_type* is one of:
+
+        - ``"genuine"``   — cross-agent factual contradiction (highest signal)
+        - ``"evolution"`` — same agent correcting itself (lower urgency)
+        - ``"ambiguous"`` — borderline NLI score or insufficient evidence
+        """
+        same_agent = fact.get("agent_id") == other.get("agent_id")
+
+        if nli_score is not None and nli_score <= 0.5:
+            return "ambiguous", "low"
+        if same_agent:
+            return "evolution", "medium"
+        return "genuine", "high"
+
     async def _scan_fact_for_conflicts(self, fact_id: str) -> None:
         """Compare a single fact against all current facts in its scope and cross-scope.
 
@@ -1145,7 +1164,7 @@ class EngramEngine:
                     conflicts_on.append(f"'{name}': {label_new} vs {label_other}")
 
                 if conflicts_on:
-                    severity = "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                    conflict_type, severity = self._classify_conflict_type(fact, other)
                     cid = uuid.uuid4().hex
                     await self.storage.insert_conflict(
                         {
@@ -1161,12 +1180,27 @@ class EngramEngine:
                             ),
                             "severity": severity,
                             "status": "open",
+                            "conflict_type": conflict_type,
                         }
                     )
-                    try:
-                        self._suggestion_queue.put_nowait(cid)
-                    except asyncio.QueueFull:
-                        pass
+                    if conflict_type == "evolution":
+                        await self._auto_resolve_evolution(cid, fact, other)
+                    else:
+                        try:
+                            self._suggestion_queue.put_nowait(cid)
+                        except asyncio.QueueFull:
+                            pass
+                    await self._fire_event(
+                        "conflict.detected",
+                        {
+                            "conflict_id": cid,
+                            "fact_a_id": fact_id,
+                            "fact_b_id": other["id"],
+                            "detection_tier": "tier2_numeric",
+                            "conflict_type": conflict_type,
+                            "severity": severity,
+                        },
+                    )
                     logger.info(
                         "Conflict detected (same-scope numeric): %s (facts %s, %s)",
                         ", ".join(conflicts_on),
@@ -1210,9 +1244,9 @@ class EngramEngine:
                         [(fact["content"], other["content"])], apply_softmax=True
                     )
                     contradiction_score = scores[0][0]
-                    if contradiction_score > 0.7:
-                        severity = (
-                            "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                    if contradiction_score > 0.5:
+                        conflict_type, severity = self._classify_conflict_type(
+                            fact, other, nli_score=float(contradiction_score)
                         )
                         cid = uuid.uuid4().hex
                         await self.storage.insert_conflict(
@@ -1229,12 +1263,28 @@ class EngramEngine:
                                 ),
                                 "severity": severity,
                                 "status": "open",
+                                "conflict_type": conflict_type,
                             }
                         )
-                        try:
-                            self._suggestion_queue.put_nowait(cid)
-                        except asyncio.QueueFull:
-                            pass
+                        if conflict_type == "evolution":
+                            await self._auto_resolve_evolution(cid, fact, other)
+                        else:
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                pass
+                        await self._fire_event(
+                            "conflict.detected",
+                            {
+                                "conflict_id": cid,
+                                "fact_a_id": fact_id,
+                                "fact_b_id": other["id"],
+                                "detection_tier": "tier1_nli",
+                                "conflict_type": conflict_type,
+                                "severity": severity,
+                                "nli_score": float(contradiction_score),
+                            },
+                        )
                         logger.info(
                             "NLI conflict detected (score=%.2f): facts %s, %s",
                             contradiction_score,
@@ -1281,9 +1331,7 @@ class EngramEngine:
                         conflicts_on.append(f"'{name}': {label_new} vs {label_other}")
 
                     if conflicts_on:
-                        severity = (
-                            "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
-                        )
+                        conflict_type, severity = self._classify_conflict_type(fact, other)
                         cid = uuid.uuid4().hex
                         await self.storage.insert_conflict(
                             {
@@ -1299,12 +1347,27 @@ class EngramEngine:
                                 ),
                                 "severity": severity,
                                 "status": "open",
+                                "conflict_type": conflict_type,
                             }
                         )
-                        try:
-                            self._suggestion_queue.put_nowait(cid)
-                        except asyncio.QueueFull:
-                            pass
+                        if conflict_type == "evolution":
+                            await self._auto_resolve_evolution(cid, fact, other)
+                        else:
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                pass
+                        await self._fire_event(
+                            "conflict.detected",
+                            {
+                                "conflict_id": cid,
+                                "fact_a_id": fact_id,
+                                "fact_b_id": other["id"],
+                                "detection_tier": "tier2b_cross_scope",
+                                "conflict_type": conflict_type,
+                                "severity": severity,
+                            },
+                        )
                         logger.info(
                             "Conflict detected (cross-scope numeric): %s (facts %s, %s)",
                             ", ".join(conflicts_on),
@@ -1336,6 +1399,10 @@ class EngramEngine:
                 if first_fact_id and first_fact_id != fact_id:
                     # Check we haven't already flagged this pair
                     if not await self.storage.conflict_exists(first_fact_id, fact_id):
+                        first_fact = await self.storage.get_fact_by_id(first_fact_id)
+                        conflict_type, severity = self._classify_conflict_type(
+                            first_fact or {}, fact
+                        )
                         cid = uuid.uuid4().hex
                         await self.storage.insert_conflict(
                             {
@@ -1346,14 +1413,29 @@ class EngramEngine:
                                 "detection_tier": "tier3_tkg_reversal",
                                 "nli_score": None,
                                 "explanation": rev["explanation"],
-                                "severity": rev.get("severity", "high"),
+                                "severity": severity,
                                 "status": "open",
+                                "conflict_type": conflict_type,
                             }
                         )
-                        try:
-                            self._suggestion_queue.put_nowait(cid)
-                        except asyncio.QueueFull:
-                            pass
+                        if conflict_type == "evolution":
+                            await self._auto_resolve_evolution(cid, first_fact or {}, fact)
+                        else:
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                pass
+                        await self._fire_event(
+                            "conflict.detected",
+                            {
+                                "conflict_id": cid,
+                                "fact_a_id": first_fact_id,
+                                "fact_b_id": fact_id,
+                                "detection_tier": "tier3_tkg_reversal",
+                                "conflict_type": conflict_type,
+                                "severity": severity,
+                            },
+                        )
                         logger.info(
                             "TKG reversal detected: %s (facts %s, %s)",
                             rev["explanation"][:80],
@@ -1406,6 +1488,7 @@ class EngramEngine:
                     "suggested_winning_fact_id": r.get("suggested_winning_fact_id"),
                     "suggestion_reasoning": r.get("suggestion_reasoning"),
                     "suggestion_generated_at": r.get("suggestion_generated_at"),
+                    "conflict_type": r.get("conflict_type", "genuine"),
                 }
             )
         return results
@@ -1458,7 +1541,7 @@ class EngramEngine:
                     conflicts_on.append(f"'{name}': {label_a} vs {label_b}")
 
                 if conflicts_on:
-                    severity = "high" if a.get("agent_id") != b.get("agent_id") else "medium"
+                    conflict_type, severity = self._classify_conflict_type(a, b)
                     cid = uuid.uuid4().hex
                     await self.storage.insert_conflict(
                         {
@@ -1474,8 +1557,57 @@ class EngramEngine:
                             ),
                             "severity": severity,
                             "status": "open",
+                            "conflict_type": conflict_type,
                         }
                     )
+                    if conflict_type == "evolution":
+                        await self._auto_resolve_evolution(cid, a, b)
+
+    async def _auto_resolve_evolution(
+        self, conflict_id: str, fact_a: dict[str, Any], fact_b: dict[str, Any]
+    ) -> None:
+        """Auto-resolve an evolution conflict by keeping the newer fact.
+
+        Called immediately after inserting a conflict classified as 'evolution'
+        (same-agent self-correction). The fact with the later committed_at wins;
+        the older one's validity window is closed so it no longer appears in
+        current-facts queries.
+        """
+        committed_a = fact_a.get("committed_at") or ""
+        committed_b = fact_b.get("committed_at") or ""
+        if committed_a >= committed_b:
+            winner_id, loser_id = fact_a["id"], fact_b["id"]
+        else:
+            winner_id, loser_id = fact_b["id"], fact_a["id"]
+
+        await self.storage.close_validity_window(fact_id=loser_id)
+        await self.storage.auto_resolve_conflict(
+            conflict_id=conflict_id,
+            resolution_type="winner",
+            resolution=(
+                f"Auto-resolved: same-agent self-correction. "
+                f"Newer fact {winner_id[:12]} supersedes older fact {loser_id[:12]}."
+            ),
+            resolved_by="engram-auto",
+        )
+        asyncio.ensure_future(
+            self._fire_event(
+                "conflict.resolved",
+                {
+                    "conflict_id": conflict_id,
+                    "resolution_type": "winner",
+                    "auto_resolved": True,
+                    "winner_id": winner_id,
+                    "loser_id": loser_id,
+                },
+            )
+        )
+        logger.info(
+            "Auto-resolved evolution conflict %s: winner=%s loser=%s",
+            conflict_id[:12],
+            winner_id[:12],
+            loser_id[:12],
+        )
 
     # ── engram_resolve ───────────────────────────────────────────────
 

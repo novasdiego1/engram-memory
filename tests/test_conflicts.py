@@ -7,6 +7,8 @@ correctly settles disagreements — leaving only the winning fact active.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from engram.engine import EngramEngine
@@ -189,3 +191,143 @@ async def test_dismissed_resolution_leaves_both_facts_active(
     f2 = await storage.get_fact_by_id(r2["fact_id"])
     assert f1["valid_until"] is None
     assert f2["valid_until"] is None
+
+
+# ── conflict_type classification ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_same_agent_conflict_classified_as_evolution(engine: EngramEngine):
+    """When the same agent commits contradictory facts the conflict is classified as evolution
+    and auto-resolved — it should not appear in the open conflict list."""
+    await engine.commit(
+        content="Worker pool size is 4 threads",
+        scope="conflicts-type",
+        confidence=0.9,
+        agent_id="agent-self-correct",
+    )
+    await engine.commit(
+        content="Worker pool size is 8 threads",
+        scope="conflicts-type",
+        confidence=0.9,
+        agent_id="agent-self-correct",
+    )
+
+    await engine._detection_queue.join()
+
+    # Evolution conflicts are auto-resolved and must not appear as open
+    open_conflicts = await engine.get_conflicts(scope="conflicts-type", status="open")
+    assert len(open_conflicts) == 0
+
+    # They are visible in the resolved view
+    resolved = await engine.get_conflicts(scope="conflicts-type", status="resolved")
+    assert len(resolved) >= 1
+    assert all(c["conflict_type"] == "evolution" for c in resolved)
+    assert all(c["auto_resolved"] is True for c in resolved)
+
+
+@pytest.mark.asyncio
+async def test_evolution_auto_resolve_keeps_newer_fact(engine: EngramEngine, storage: Storage):
+    """Auto-resolution of an evolution conflict retires the older fact and keeps the newer one."""
+    r1 = await engine.commit(
+        content="Cache TTL is 60 seconds",
+        scope="conflicts-autoevolve",
+        confidence=0.9,
+        agent_id="agent-updater",
+    )
+    r2 = await engine.commit(
+        content="Cache TTL is 300 seconds",
+        scope="conflicts-autoevolve",
+        confidence=0.9,
+        agent_id="agent-updater",
+    )
+
+    await engine._detection_queue.join()
+
+    # Older fact (r1) must be retired
+    old_fact = await storage.get_fact_by_id(r1["fact_id"])
+    new_fact = await storage.get_fact_by_id(r2["fact_id"])
+    assert old_fact["valid_until"] is not None, "Older fact must be retired"
+    assert new_fact["valid_until"] is None, "Newer fact must remain active"
+
+
+@pytest.mark.asyncio
+async def test_cross_agent_conflict_classified_as_genuine(engine: EngramEngine):
+    """Cross-agent contradictions are classified as genuine conflicts."""
+    await engine.commit(
+        content="Queue retry limit is 3 attempts",
+        scope="conflicts-genuine",
+        confidence=0.9,
+        agent_id="agent-alpha",
+    )
+    await engine.commit(
+        content="Queue retry limit is 10 attempts",
+        scope="conflicts-genuine",
+        confidence=0.9,
+        agent_id="agent-beta",
+    )
+
+    await engine._detection_queue.join()
+
+    conflicts = await engine.get_conflicts(scope="conflicts-genuine", status="open")
+    assert len(conflicts) >= 1
+    assert any(c["conflict_type"] == "genuine" for c in conflicts)
+
+
+@pytest.mark.asyncio
+async def test_conflict_detected_webhook_fires(engine: EngramEngine):
+    """A conflict.detected event is queued as a webhook delivery when a conflict is found."""
+    fired: list[dict] = []
+
+    async def _capture(event: str, payload: dict) -> None:  # type: ignore[override]
+        if event == "conflict.detected":
+            fired.append(payload)
+
+    original = engine._fire_event
+    engine._fire_event = _capture  # type: ignore[assignment]
+
+    try:
+        await engine.commit(
+            content="Timeout is 30 seconds",
+            scope="conflicts-webhook",
+            confidence=0.9,
+            agent_id="agent-p",
+        )
+        await engine.commit(
+            content="Timeout is 60 seconds",
+            scope="conflicts-webhook",
+            confidence=0.9,
+            agent_id="agent-q",
+        )
+        await engine._detection_queue.join()
+    finally:
+        engine._fire_event = original  # type: ignore[assignment]
+
+    assert len(fired) >= 1
+    assert all("conflict_id" in e for e in fired)
+    assert all("conflict_type" in e for e in fired)
+
+
+@pytest.mark.asyncio
+async def test_workspace_stats_includes_conflict_by_type(engine: EngramEngine):
+    """get_workspace_stats returns a by_type breakdown of conflicts."""
+    await engine.commit(
+        content="Max retries is 3",
+        scope="conflicts-stats",
+        confidence=0.9,
+        agent_id="agent-stats-a",
+    )
+    await engine.commit(
+        content="Max retries is 5",
+        scope="conflicts-stats",
+        confidence=0.9,
+        agent_id="agent-stats-b",
+    )
+
+    await engine._detection_queue.join()
+
+    stats = await engine.storage.get_workspace_stats()
+    assert "by_type" in stats["conflicts"]
+    # At least one conflict should be present in the by_type breakdown
+    by_type = stats["conflicts"]["by_type"]
+    assert sum(by_type.values()) >= 1

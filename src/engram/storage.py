@@ -1011,11 +1011,12 @@ class SQLiteStorage(BaseStorage):
             "explanation",
             "severity",
             "status",
+            "conflict_type",
             "workspace_id",
         ]
         placeholders = ", ".join(["?"] * len(cols))
         col_names = ", ".join(cols)
-        defaults = {"workspace_id": self.workspace_id}
+        defaults = {"workspace_id": self.workspace_id, "conflict_type": "genuine"}
         values = [conflict.get(c, defaults.get(c)) for c in cols]
         await self.db.execute(
             f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders})", values
@@ -1665,6 +1666,13 @@ class SQLiteStorage(BaseStorage):
         )
         conflict_by_tier = {r["detection_tier"]: r["cnt"] for r in await cur.fetchall()}
 
+        cur = await self.db.execute(
+            "SELECT conflict_type, COUNT(*) as cnt FROM conflicts "
+            "WHERE workspace_id = ? GROUP BY conflict_type",
+            (ws,),
+        )
+        conflict_by_type = {r["conflict_type"]: r["cnt"] for r in await cur.fetchall()}
+
         # ── agents ──────────────────────────────────────────────────
         cur = await self.db.execute(
             "SELECT agent_id, total_commits, flagged_commits FROM agents "
@@ -1704,6 +1712,7 @@ class SQLiteStorage(BaseStorage):
                 "dismissed": conflict_by_status.get("dismissed", 0),
                 "total": sum(conflict_by_status.values()),
                 "by_tier": conflict_by_tier,
+                "by_type": conflict_by_type,
             },
             "agents": {
                 "total": total_agents,
