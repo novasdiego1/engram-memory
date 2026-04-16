@@ -1407,3 +1407,60 @@ async def engram_create_rule(
         condition_value=condition_value,
         resolution_type=resolution_type,
     )
+
+
+# ── engram_check_conflicts ───────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_check_conflicts(
+    content: str,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """Check if proposed content conflicts with existing facts.
+
+    Use this as a pre-commit hook - before writing code or making decisions,
+    check if the proposed action contradicts established knowledge.
+
+    Parameters:
+    - content: The proposed fact or action to check.
+    - scope: Optional scope to filter checks (e.g., 'backend', 'auth').
+
+    Returns: {has_conflicts, conflicts: [{fact_id, explanation, severity}]}
+    If has_conflicts is true, the action should be blocked until resolved.
+    """
+    engine = get_engine()
+    if engine is None:
+        return {"error": "Engine not initialized"}
+
+    fact = {
+        "content": content,
+        "scope": scope or "global",
+        "confidence": 0.9,
+        "fact_type": "observation",
+        "agent_id": "pre-commit-hook",
+    }
+
+    await engine.commit(fact)
+    conflicts = await engine.get_conflicts(scope=fact["scope"], status="open")
+
+    if conflicts:
+        return {
+            "has_conflicts": True,
+            "conflicts": [
+                {
+                    "conflict_id": c.get("id"),
+                    "fact_id": c.get("fact_a_id"),
+                    "explanation": c.get("explanation"),
+                    "severity": c.get("severity"),
+                }
+                for c in conflicts[:5]
+            ],
+            "message": f"Found {len(conflicts)} conflicting facts.",
+        }
+
+    return {
+        "has_conflicts": False,
+        "conflicts": [],
+        "message": "No conflicts detected. Safe to proceed.",
+    }
