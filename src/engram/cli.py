@@ -36,10 +36,41 @@ _PATH_XDG_DIR = (
 )
 
 
-@click.group()
-def main() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def main(ctx: click.Context) -> None:
     """Engram - Multi-agent memory consistency for engineering teams."""
-    pass
+    if ctx.invoked_subcommand is not None:
+        return
+
+    import os
+    from engram.workspace import read_workspace, WORKSPACE_PATH
+
+    ws = read_workspace()
+    configured = ws is not None or bool(os.environ.get("ENGRAM_DB_URL"))
+
+    if not configured:
+        click.echo("Engram - Multi-agent memory consistency for engineering teams.")
+        click.echo()
+        click.echo("  Status: Not connected to a workspace")
+        click.echo()
+        click.echo("  Get started:")
+        click.echo("    engram setup              — configure a new workspace")
+        click.echo("    engram join <invite-key>  — join an existing workspace")
+        click.echo("    engram install            — add Engram to your MCP clients")
+        click.echo()
+        click.echo("  Run  engram --help  to see all commands.")
+        return
+
+    # Connected — show a compact status summary
+    mode = "team (PostgreSQL)" if (ws and ws.db_url) else "local (SQLite)"
+    workspace_id = (ws.engram_id if ws else os.environ.get("ENGRAM_DB_URL", "")[:24]) or "-"
+    click.echo(f"Engram  connected  [{mode}]  {workspace_id}")
+    click.echo()
+    click.echo("  engram conflicts    — review open memory conflicts")
+    click.echo("  engram search <q>   — query workspace memory")
+    click.echo("  engram status       — full workspace info")
+    click.echo("  engram --help       — all commands")
 
 
 # ── engram install ───────────────────────────────────────────────────
@@ -2751,6 +2782,502 @@ def export_cmd(format: str, output: str | None, scope: str | None) -> None:
             click.echo(content)
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+
+
+# ── engram conflicts ────────────────────────────────────────────────────────
+
+import sys as _sys
+
+import questionary
+from rich.console import Console as _Console
+from rich.panel import Panel as _Panel
+from rich.text import Text as _Text
+
+_TUI_STYLE = questionary.Style(
+    [
+        ("qmark", "fg:#5c7cfa bold"),
+        ("question", "bold"),
+        ("answer", "fg:#69db7c bold"),
+        ("pointer", "fg:#5c7cfa bold"),
+        ("highlighted", "fg:#5c7cfa bold"),
+        ("selected", "fg:#69db7c"),
+        ("separator", "fg:#555555"),
+        ("instruction", "fg:#868e96 italic"),
+        ("text", ""),
+        ("disabled", "fg:#555555 italic"),
+    ]
+)
+
+_SEVERITY_ORDER: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+_SEVERITY_DOT: dict[str, str] = {
+    "critical": "[bold red]\u25cf[/bold red]",
+    "high": "[bold yellow]\u25c6[/bold yellow]",
+    "medium": "[bold cyan]\u25c8[/bold cyan]",
+    "low": "[dim]\u00b7[/dim]",
+}
+
+_SEVERITY_RICH: dict[str, str] = {
+    "critical": "bold red",
+    "high": "bold yellow",
+    "medium": "bold cyan",
+    "low": "white",
+}
+
+
+def _short_conflict_id(conflict_id: str) -> str:
+    return str(conflict_id)[:12]
+
+
+def _find_open_conflict(rows: list[dict], prefix: str) -> dict | None:
+    return next((c for c in rows if c["conflict_id"].startswith(prefix)), None)
+
+
+async def _conflicts_engine_ctx() -> tuple:
+    """Create a connected storage + engine following the same pattern as _search_once."""
+    import os
+
+    from engram.engine import EngramEngine
+
+    db_url = os.environ.get("ENGRAM_DB_URL", "")
+    workspace_id = "local"
+    schema = "engram"
+
+    try:
+        from engram.workspace import read_workspace
+
+        ws = read_workspace()
+        if ws and ws.db_url:
+            db_url = ws.db_url
+            workspace_id = ws.engram_id
+            schema = ws.schema
+    except Exception:
+        pass
+
+    if db_url:
+        from engram.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
+    else:
+        from engram.storage import SQLiteStorage
+
+        storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=workspace_id)
+
+    await storage.connect()
+    engine = EngramEngine(storage)
+    return engine, storage
+
+
+def _render_conflict_panel(c: dict, console: _Console) -> None:
+    """Render a Rich detail panel for one conflict."""
+    severity = c.get("severity") or "low"
+    tier = c.get("detection_tier") or "-"
+    fact_a = c.get("fact_a") or {}
+    fact_b = c.get("fact_b") or {}
+    explanation = c.get("explanation") or ""
+    suggestion = c.get("suggested_resolution") or ""
+    suggestion_type = c.get("suggested_resolution_type") or ""
+    suggestion_reason = c.get("suggestion_reasoning") or ""
+
+    sev_style = _SEVERITY_RICH.get(severity, "white")
+    body = _Text()
+
+    body.append(f"Conflict  ", style="dim")
+    body.append(f"{c.get('conflict_id') or ''}\n", style="white")
+    body.append(f"Severity  ", style="dim")
+    body.append(f"{severity.upper()}", style=sev_style)
+    body.append(f"   Tier: {tier}\n", style="dim")
+    body.append(f"Detected  ", style="dim")
+    body.append(f"{c.get('detected_at') or '-'}\n", style="dim")
+
+    body.append("\n")
+    body.append("Fact A", style="bold white")
+    body.append(f"  [{(fact_a.get('fact_id') or '')[:12]}]\n", style="dim")
+    body.append(f"  Agent  {fact_a.get('agent_id') or '-'}\n", style="dim")
+    body.append(f"  Scope  {fact_a.get('scope') or '-'}\n", style="dim")
+    body.append(f"  Conf   {fact_a.get('confidence', '-')}\n", style="dim")
+    body.append(f"  \u201c{fact_a.get('content') or ''}\u201d\n", style="white")
+
+    body.append("\n")
+    body.append("Fact B", style="bold white")
+    body.append(f"  [{(fact_b.get('fact_id') or '')[:12]}]\n", style="dim")
+    body.append(f"  Agent  {fact_b.get('agent_id') or '-'}\n", style="dim")
+    body.append(f"  Scope  {fact_b.get('scope') or '-'}\n", style="dim")
+    body.append(f"  Conf   {fact_b.get('confidence', '-')}\n", style="dim")
+    body.append(f"  \u201c{fact_b.get('content') or ''}\u201d\n", style="white")
+
+    if explanation:
+        body.append("\n")
+        body.append("Explanation  ", style="dim")
+        body.append(explanation + "\n", style="italic")
+
+    if suggestion:
+        body.append("\n")
+        body.append("AI suggestion  ", style="dim")
+        body.append(f"{suggestion_type}  ", style="bold cyan")
+        body.append(suggestion + "\n", style="cyan")
+        if suggestion_reason:
+            body.append(f"  {suggestion_reason}\n", style="dim")
+
+    title = _Text()
+    title.append("\u25cf ", style=sev_style)
+    title.append("Conflict", style="bold white")
+
+    console.print(_Panel(body, title=title, border_style="bright_black", padding=(0, 1)))
+
+
+def _run_conflicts_tui(scope: str | None, status: str) -> None:
+    """Full-screen interactive TUI — lists conflicts, lets user pick and resolve."""
+    console = _Console()
+
+    while True:
+        # ── fetch ─────────────────────────────────────────────────────
+        async def _fetch() -> list[dict]:
+            engine, storage = await _conflicts_engine_ctx()
+            try:
+                return await engine.get_conflicts(scope=scope, status=status)
+            finally:
+                await storage.close()
+
+        try:
+            rows = asyncio.run(_fetch())
+        except Exception as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            return
+
+        sorted_rows = sorted(
+            rows, key=lambda c: _SEVERITY_ORDER.get(c.get("severity") or "low", 3)
+        )
+
+        # ── header ────────────────────────────────────────────────────
+        console.print()
+        console.print(" [bold white]Engram[/bold white] [dim]\u00b7[/dim] Memory Conflicts")
+        console.print()
+
+        if not sorted_rows:
+            console.print("  [green]\u2713[/green]  No open conflicts\n")
+            return
+
+        # ── build choices ─────────────────────────────────────────────
+        _MAX = 52
+        choices: list[questionary.Choice] = []
+        for c in sorted_rows:
+            sev = c.get("severity") or "low"
+            cid = _short_conflict_id(c.get("conflict_id") or "")
+            a = (c.get("fact_a") or {}).get("content") or ""
+            b = (c.get("fact_b") or {}).get("content") or ""
+            if len(a) > _MAX:
+                a = a[:_MAX - 1] + "\u2026"
+            if len(b) > _MAX:
+                b = b[:_MAX - 1] + "\u2026"
+            dot = {"critical": "\u25cf", "high": "\u25c6", "medium": "\u25c8", "low": "\u00b7"}.get(
+                sev, "\u00b7"
+            )
+            label = f"{dot} {sev[:3].upper()}  {cid}  {a}  \u2194  {b}"
+            choices.append(questionary.Choice(title=label, value=c))
+
+        choices.append(questionary.Separator())
+        choices.append(questionary.Choice(title="  Exit", value=None))
+
+        selected = questionary.select(
+            f"Open conflicts ({len(sorted_rows)})  \u2191\u2193 navigate  Enter select",
+            choices=choices,
+            style=_TUI_STYLE,
+            use_shortcuts=False,
+        ).ask()
+
+        if selected is None:
+            console.print()
+            return
+
+        # ── detail panel ──────────────────────────────────────────────
+        console.print()
+        _render_conflict_panel(selected, console)
+        console.print()
+
+        fact_a_content = (selected.get("fact_a") or {}).get("content") or "(no content)"
+        fact_b_content = (selected.get("fact_b") or {}).get("content") or "(no content)"
+
+        _a_short = fact_a_content[:60] + ("\u2026" if len(fact_a_content) > 60 else "")
+        _b_short = fact_b_content[:60] + ("\u2026" if len(fact_b_content) > 60 else "")
+
+        # ── resolution choice ─────────────────────────────────────────
+        resolution_choice = questionary.select(
+            "How do you want to resolve this?",
+            choices=[
+                questionary.Choice(f"Pick Fact A  \u2014  \u201c{_a_short}\u201d", value="A"),
+                questionary.Choice(f"Pick Fact B  \u2014  \u201c{_b_short}\u201d", value="B"),
+                questionary.Choice("Merge \u2014 both facts are superseded", value="M"),
+                questionary.Choice("Dismiss \u2014 this is a false positive", value="D"),
+                questionary.Separator(),
+                questionary.Choice("\u2190  Back to list", value="back"),
+            ],
+            style=_TUI_STYLE,
+        ).ask()
+
+        if resolution_choice is None or resolution_choice == "back":
+            continue
+
+        # ── note ──────────────────────────────────────────────────────
+        note = questionary.text(
+            "Resolution note:",
+            style=_TUI_STYLE,
+        ).ask()
+
+        if note is None:
+            continue
+
+        # ── confirm ───────────────────────────────────────────────────
+        label_map = {"A": "pick Fact A", "B": "pick Fact B", "M": "merge", "D": "dismiss"}
+        confirmed = questionary.confirm(
+            f"Resolve as {label_map[resolution_choice]}?",
+            default=True,
+            style=_TUI_STYLE,
+        ).ask()
+
+        if not confirmed:
+            continue
+
+        # ── execute ───────────────────────────────────────────────────
+        resolution_type = "dismissed" if resolution_choice == "D" else (
+            "merge" if resolution_choice == "M" else "winner"
+        )
+        winning_claim_id: str | None = None
+        if resolution_choice == "A":
+            winning_claim_id = (selected.get("fact_a") or {}).get("fact_id")
+        elif resolution_choice == "B":
+            winning_claim_id = (selected.get("fact_b") or {}).get("fact_id")
+
+        async def _do_resolve() -> dict:
+            engine, storage = await _conflicts_engine_ctx()
+            try:
+                return await engine.resolve(
+                    conflict_id=selected["conflict_id"],
+                    resolution_type=resolution_type,
+                    resolution=note,
+                    winning_claim_id=winning_claim_id,
+                )
+            finally:
+                await storage.close()
+
+        try:
+            result = asyncio.run(_do_resolve())
+        except Exception as exc:
+            console.print(f"\n[red]Error:[/red] {exc}\n")
+            continue
+
+        cid_short = _short_conflict_id(selected["conflict_id"])
+        if result.get("resolved"):
+            console.print(
+                f"\n [green]\u2713[/green]  Resolved [dim]{cid_short}[/dim]"
+                f" as [bold]{resolution_type}[/bold]\n"
+            )
+        else:
+            console.print("\n [red]\u2717[/red]  Resolution returned resolved=False\n")
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+@click.option(
+    "--status",
+    type=click.Choice(["open", "resolved", "dismissed", "all"]),
+    default="open",
+    show_default=True,
+    help="Filter conflicts by status.",
+)
+@click.option("--scope", default=None, help="Optional scope prefix to filter conflicts.")
+@click.option("--json", "as_json", is_flag=True, help="Print raw JSON for piping (non-interactive).")
+def conflicts(ctx: click.Context, status: str, scope: str | None, as_json: bool) -> None:
+    """View and resolve memory conflicts from the terminal.
+
+    When called without a subcommand and connected to a TTY, launches the
+    interactive conflict resolution UI. Use --json for scripting.
+
+    \b
+    Examples:
+      engram conflicts                              # interactive TUI
+      engram conflicts --status all                 # show all statuses
+      engram conflicts --json                       # raw JSON output
+      engram conflicts resolve <id> --winner A --note "A is correct"
+      engram conflicts dismiss <id>                 # dismiss false positive
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # ── workspace check ───────────────────────────────────────────────
+    import os
+    from engram.workspace import is_configured
+
+    if not is_configured():
+        if as_json or not _sys.stdout.isatty():
+            raise click.ClickException(
+                "Not connected to a workspace. Run: engram setup  or  engram join <invite-key>"
+            )
+        console = _Console()
+        console.print()
+        console.print(" [bold white]Engram[/bold white] [dim]·[/dim] Memory Conflicts")
+        console.print()
+        console.print("  [yellow]Not connected to a workspace.[/yellow]")
+        console.print()
+        console.print("  [dim]engram setup[/dim]             — configure a new workspace")
+        console.print("  [dim]engram join <invite-key>[/dim] — join an existing workspace")
+        console.print()
+        return
+
+    # ── scripting / pipe mode ─────────────────────────────────────────
+    if as_json or not _sys.stdout.isatty():
+        async def _run() -> list[dict]:
+            engine, storage = await _conflicts_engine_ctx()
+            try:
+                return await engine.get_conflicts(scope=scope, status=status)
+            finally:
+                await storage.close()
+
+        try:
+            rows = asyncio.run(_run())
+        except Exception as exc:
+            raise click.ClickException(str(exc))
+
+        click.echo(json.dumps(rows, indent=2))
+        return
+
+    # ── interactive TUI ───────────────────────────────────────────────
+    _run_conflicts_tui(scope=scope, status=status)
+
+
+@conflicts.command()
+@click.argument("conflict_id")
+@click.option(
+    "--winner",
+    type=click.Choice(["A", "B"], case_sensitive=False),
+    default=None,
+    help="Pick fact A or B as the winning claim.",
+)
+@click.option(
+    "--merge",
+    "do_merge",
+    is_flag=True,
+    help="Mark as merged — both facts are superseded.",
+)
+@click.option(
+    "--dismiss",
+    "do_dismiss",
+    is_flag=True,
+    help="Dismiss as a false positive.",
+)
+@click.option("--note", default=None, help="Resolution note (required).")
+def resolve(
+    conflict_id: str,
+    winner: str | None,
+    do_merge: bool,
+    do_dismiss: bool,
+    note: str | None,
+) -> None:
+    """Resolve a specific conflict by ID (non-interactive, for scripting).
+
+    CONFLICT_ID may be the full UUID or a unique prefix.
+    """
+    flags_set = sum([winner is not None, do_merge, do_dismiss])
+    if flags_set > 1:
+        raise click.UsageError("Specify only one of --winner, --merge, or --dismiss.")
+    if flags_set == 0:
+        raise click.UsageError(
+            "Specify one of --winner A/B, --merge, or --dismiss. "
+            "For the interactive UI run: engram conflicts"
+        )
+    if not note:
+        raise click.UsageError("--note is required.")
+
+    async def _run() -> dict:
+        engine, storage = await _conflicts_engine_ctx()
+        try:
+            open_rows = await engine.get_conflicts(status="open")
+            match = _find_open_conflict(open_rows, conflict_id)
+            if not match:
+                all_rows = await engine.get_conflicts(status="all")
+                any_match = _find_open_conflict(all_rows, conflict_id)
+                if any_match:
+                    raise click.ClickException(
+                        f"Conflict {conflict_id!r} is already {any_match['status']}."
+                    )
+                raise click.ClickException(f"No open conflict matching {conflict_id!r}.")
+
+            resolution_type = "dismissed" if do_dismiss else ("merge" if do_merge else "winner")
+            winning_claim_id: str | None = None
+            if winner == "A":
+                winning_claim_id = (match.get("fact_a") or {}).get("fact_id")
+            elif winner == "B":
+                winning_claim_id = (match.get("fact_b") or {}).get("fact_id")
+
+            return await engine.resolve(
+                conflict_id=match["conflict_id"],
+                resolution_type=resolution_type,
+                resolution=note,
+                winning_claim_id=winning_claim_id,
+            )
+        finally:
+            await storage.close()
+
+    try:
+        result = asyncio.run(_run())
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    if result.get("resolved"):
+        click.echo(
+            click.style("Resolved", fg="green")
+            + f": {_short_conflict_id(result.get('conflict_id', conflict_id))}"
+            + f" ({result.get('resolution_type', '')})"
+        )
+    else:
+        raise click.ClickException("Resolution returned resolved=False — check server logs.")
+
+
+@conflicts.command()
+@click.argument("conflict_id")
+@click.option("--note", default=None, help="Optional reason for dismissal.")
+def dismiss(conflict_id: str, note: str | None) -> None:
+    """Dismiss a conflict as a false positive (non-interactive).
+
+    CONFLICT_ID may be the full UUID or a unique prefix.
+    """
+
+    async def _run() -> tuple[dict, dict]:
+        engine, storage = await _conflicts_engine_ctx()
+        try:
+            open_rows = await engine.get_conflicts(status="open")
+            match = _find_open_conflict(open_rows, conflict_id)
+            if not match:
+                all_rows = await engine.get_conflicts(status="all")
+                any_match = _find_open_conflict(all_rows, conflict_id)
+                if any_match:
+                    raise click.ClickException(
+                        f"Conflict {conflict_id!r} is already {any_match['status']}."
+                    )
+                raise click.ClickException(f"No open conflict matching {conflict_id!r}.")
+            result = await engine.resolve(
+                conflict_id=match["conflict_id"],
+                resolution_type="dismissed",
+                resolution=note or "Dismissed via CLI",
+            )
+            return result, match
+        finally:
+            await storage.close()
+
+    try:
+        result, conflict = asyncio.run(_run())
+    except click.ClickException:
+        raise
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    cid_short = _short_conflict_id(conflict["conflict_id"])
+    if result.get("resolved"):
+        click.echo(click.style("Dismissed", fg="yellow") + f": {cid_short}")
+    else:
+        raise click.ClickException("Dismiss returned resolved=False — check server logs.")
 
 
 if __name__ == "__main__":

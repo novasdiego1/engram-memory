@@ -25,6 +25,24 @@ if [ "$OS" != "Darwin" ] && [ "$OS" != "Linux" ]; then
   exit 1
 fi
 
+# ── Install engram CLI ─────────────────────────────────────────────
+echo ""
+echo "Installing engram CLI..."
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "  Fetching uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  [ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env" 2>/dev/null || true
+fi
+
+if uv tool install "engram-team" --upgrade --quiet 2>/dev/null; then
+  export PATH="$HOME/.local/bin:$PATH"
+  echo "  ✓ engram CLI installed"
+else
+  echo "  ! CLI install failed — run manually: uv tool install engram-team"
+fi
+
 # ── Require Python 3 ───────────────────────────────────────────────
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Python 3 is required but not found. Please install it first."
@@ -334,14 +352,22 @@ if [ "$PATCHED" -eq 0 ]; then
   echo ""
   echo "Then restart your IDE."
 else
-  echo "Done! Restart your IDE, then ask your agent:"
+  echo "Done!"
+  echo ""
+  echo "  Restart your terminal, then run:"
+  echo ""
+  echo "    engram                — get started"
+  echo "    engram conflicts      — review memory conflicts"
+  echo "    engram search <term>  — query workspace memory"
+  echo ""
+  echo "  Or restart your IDE and ask your agent:"
   if [ -z "$INVITE_KEY" ]; then
     echo ""
-    echo "  \"Set up Engram for my team\"    — to create a new workspace"
-    echo "  \"Join Engram with key ek_live_...\"  — to join a teammate's workspace"
+    echo "    \"Set up Engram for my team\"         — create a new workspace"
+    echo "    \"Join Engram with key ek_live_...\"  — join a teammate's workspace"
   else
     echo ""
-    echo "  \"Set up Engram\"  — your agent will connect to your workspace"
+    echo "    \"Set up Engram\"  — your agent will connect to your workspace"
   fi
 fi
 echo ""

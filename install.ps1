@@ -55,6 +55,27 @@ function Write-JsonFile {
     [System.IO.File]::WriteAllText($FilePath, $json, $encoding)
 }
 
+# ── Install engram CLI ─────────────────────────────────────────────
+Write-Host "`nInstalling engram CLI..."
+
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+    Write-Host "  Fetching uv..."
+    irm https://astral.sh/uv/install.ps1 | iex
+    # Refresh PATH so uv is available in this session
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "User") + ";" + $env:PATH
+}
+
+try {
+    uv tool install "engram-team" --upgrade --quiet 2>$null
+    $uvBin = "$env:USERPROFILE\.local\bin"
+    if ($env:PATH -notlike "*$uvBin*") {
+        $env:PATH = "$uvBin;$env:PATH"
+    }
+    Write-Host "  ✓ engram CLI installed"
+} catch {
+    Write-Host "  ! CLI install failed — run manually: uv tool install engram-team"
+}
+
 # ── Ask for invite key if not provided ─────────────────────────────
 if (-not $InviteKey) {
     $hasKey = Read-Host "`nDo you have an invite key from a teammate? (y/n)"
@@ -339,11 +360,19 @@ if ($patched -eq 0) {
     Write-Host ''
     Write-Host 'Then restart your IDE.'
 } else {
-    Write-Host 'Done! Restart your IDE, then ask your agent:'
+    Write-Host 'Done!'
+    Write-Host ''
+    Write-Host '  Restart your terminal, then run:'
+    Write-Host ''
+    Write-Host '    engram                 - get started'
+    Write-Host '    engram conflicts       - review memory conflicts'
+    Write-Host '    engram search <term>   - query workspace memory'
+    Write-Host ''
+    Write-Host '  Or restart your IDE and ask your agent:'
     if (-not $InviteKey) {
         Write-Host ''
-        Write-Host '  "Set up Engram for my team"    - to create a new workspace'
-        Write-Host '  "Join Engram with key ek_live_..."  - to join a teammate''s workspace'
+        Write-Host '  "Set up Engram for my team"         - create a new workspace'
+        Write-Host '  "Join Engram with key ek_live_..."  - join a teammate''s workspace'
     } else {
         Write-Host ''
         Write-Host '  "Set up Engram"  - your agent will connect to your workspace'

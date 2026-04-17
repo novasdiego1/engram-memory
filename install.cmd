@@ -11,6 +11,25 @@ if defined ENGRAM_MCP_URL (
 )
 set "INVITE_KEY="
 
+REM ── Install engram CLI ───────────────────────────────────────────
+echo.
+echo Installing engram CLI...
+
+where uv >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   Fetching uv...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+)
+
+uv tool install engram-team --upgrade --quiet >nul 2>&1
+if %errorlevel% equ 0 (
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+    echo   + engram CLI installed
+) else (
+    echo   ! CLI install failed -- run manually: uv tool install engram-team
+)
+
 REM ── Require Python 3 ─────────────────────────────────────────────
 where python3 >nul 2>&1
 if %errorlevel% equ 0 (
@@ -224,13 +243,21 @@ if %PATCHED% equ 0 (
     echo.
     echo Then restart your IDE.
 ) else (
-    echo Done! Restart your IDE, then ask your agent:
+    echo Done!
+    echo.
+    echo   Restart your terminal, then run:
+    echo.
+    echo     engram                 - get started
+    echo     engram conflicts       - review memory conflicts
+    echo     engram search ^<term^>   - query workspace memory
+    echo.
+    echo   Or restart your IDE and ask your agent:
     echo.
     if "%INVITE_KEY%"=="" (
-        echo   "Set up Engram for my team"    - to create a new workspace
-        echo   "Join Engram with key ek_live_..."  - to join a teammate's workspace
+        echo     "Set up Engram for my team"         - create a new workspace
+        echo     "Join Engram with key ek_live_..."  - join a teammate's workspace
     ) else (
-        echo   "Set up Engram"  - your agent will connect to your workspace
+        echo     "Set up Engram"  - your agent will connect to your workspace
     )
 )
 echo.
