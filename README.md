@@ -103,6 +103,14 @@ Engram reads the workspace's commit history as a chronological story and asks: *
 
 Full design: [`docs/CONFLICT_DETECTIVE.md`](./docs/CONFLICT_DETECTIVE.md)
 
+### Resolving Conflicts
+
+You can resolve conflicts in two ways:
+
+**Terminal** — type `engram` to open an interactive conflict review. Arrow-key through open conflicts, read both sides, and pick a winner (or merge/dismiss) without leaving your terminal.
+
+**Web dashboard** — visit [engram-memory.com/dashboard](https://engram-memory.com/dashboard) to review and resolve conflicts in the browser.
+
 ---
 
 ## Privacy & Data
