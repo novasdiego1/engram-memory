@@ -48,38 +48,129 @@ def main(ctx: click.Context) -> None:
         return
 
     import os
+    import sys
     from engram.workspace import read_workspace
 
+    console = _Console()
     ws = read_workspace()
     configured = ws is not None or bool(os.environ.get("ENGRAM_DB_URL"))
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
 
     if not configured:
-        click.echo("Engram - Multi-agent memory consistency for engineering teams.")
-        click.echo()
-        click.echo("  Status: Not connected to a workspace")
-        click.echo()
-        click.echo("  Get started:")
-        click.echo("    engram setup              — configure a new workspace")
-        click.echo("    engram join <invite-key>  — join an existing workspace")
-        click.echo("    engram install            — add Engram to your MCP clients")
-        click.echo()
-        click.echo("  Run  engram --help  to see all commands.")
+        console.print()
+        console.print(
+            _Panel(
+                _Text.assemble(
+                    ("Engram", "bold white"),
+                    ("  ·  ", "dim"),
+                    ("not connected to a workspace", "yellow"),
+                ),
+                border_style="dim",
+                padding=(0, 2),
+            )
+        )
+        if not interactive:
+            click.echo("  engram setup    — configure a new workspace")
+            click.echo("  engram install  — add Engram to your MCP clients")
+            click.echo("  engram --help   — all commands")
+            return
+        action = questionary.select(
+            "Get started:",
+            choices=[
+                questionary.Choice("setup         — configure a new workspace", "setup"),
+                questionary.Choice("install       — add Engram to your MCP clients", "install"),
+                questionary.Choice("quit", "quit"),
+            ],
+            use_shortcuts=False,
+            style=questionary.Style(
+                [
+                    ("selected", "fg:#00aaff bold"),
+                    ("pointer", "fg:#00aaff bold"),
+                    ("highlighted", "fg:#00aaff"),
+                ]
+            ),
+        ).ask()
+        if action and action != "quit":
+            ctx.invoke(main.commands[action])  # type: ignore[attr-defined]
         return
 
-    # Connected — show a compact status summary
+    # Connected — determine mode label
     if ws and ws.server_url and not ws.db_url:
-        mode = "hosted"
+        mode_label = "hosted"
+        mode_color = "green"
     elif ws and ws.db_url:
-        mode = "team (PostgreSQL)"
+        mode_label = "team · PostgreSQL"
+        mode_color = "cyan"
     else:
-        mode = "local (SQLite)"
+        mode_label = "local · SQLite"
+        mode_color = "blue"
+
     workspace_id = (ws.engram_id if ws else os.environ.get("ENGRAM_DB_URL", "")[:24]) or "-"
-    click.echo(f"Engram  connected  [{mode}]  {workspace_id}")
-    click.echo()
-    click.echo("  engram conflicts    — review open memory conflicts")
-    click.echo("  engram search <q>   — query workspace memory")
-    click.echo("  engram status       — full workspace info")
-    click.echo("  engram --help       — all commands")
+
+    console.print()
+    console.print(
+        _Panel(
+            _Text.assemble(
+                ("Engram", "bold white"),
+                ("  ·  ", "dim"),
+                (mode_label, mode_color + " bold"),
+                ("  ·  ", "dim"),
+                (workspace_id, "dim white"),
+            ),
+            border_style="dim",
+            padding=(0, 2),
+        )
+    )
+
+    if not interactive:
+        click.echo(f"Engram  connected  [{mode_label}]  {workspace_id}")
+        click.echo()
+        click.echo("  engram conflicts  — review open memory conflicts")
+        click.echo("  engram search <q> — query workspace memory")
+        click.echo("  engram status     — full workspace info")
+        click.echo("  engram --help     — all commands")
+        return
+
+    _MENU_STYLE = questionary.Style(
+        [
+            ("selected", "fg:#00aaff bold"),
+            ("pointer", "fg:#00aaff bold"),
+            ("highlighted", "fg:#00aaff"),
+            ("instruction", "dim"),
+        ]
+    )
+
+    action = questionary.select(
+        "What would you like to do?",
+        choices=[
+            questionary.Choice("conflicts     — review open memory conflicts", "conflicts"),
+            questionary.Choice("search        — query workspace memory", "search"),
+            questionary.Choice("tail          — stream live workspace facts", "tail"),
+            questionary.Choice("status        — workspace info", "status"),
+            questionary.Choice("whoami        — show identity", "whoami"),
+            questionary.Choice("export        — export workspace data", "export"),
+            questionary.Choice("help          — all commands", "help"),
+            questionary.Choice("quit", "quit"),
+        ],
+        use_shortcuts=False,
+        style=_MENU_STYLE,
+        instruction="(↑↓ to move, Enter to select)",
+    ).ask()
+
+    if action is None or action == "quit":
+        return
+    if action == "help":
+        click.echo(ctx.get_help())
+        return
+    if action == "search":
+        query = questionary.text(
+            "Search query:",
+            style=_MENU_STYLE,
+        ).ask()
+        if query and query.strip():
+            ctx.invoke(main.commands["search"], topic=query.strip())  # type: ignore[attr-defined]
+        return
+    ctx.invoke(main.commands[action])  # type: ignore[attr-defined]
 
 
 # ── engram install ───────────────────────────────────────────────────
