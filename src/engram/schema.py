@@ -20,7 +20,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -184,6 +184,13 @@ MIGRATIONS: dict[int, list[str]] = {
     13: [
         # Conflict type classification: genuine | evolution | ambiguous
         "ALTER TABLE conflicts ADD COLUMN conflict_type TEXT NOT NULL DEFAULT 'genuine'",
+    ],
+    14: [
+        # Fact pinning, endorsements, and downvotes
+        "ALTER TABLE facts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE facts ADD COLUMN pinned_at TEXT",
+        "ALTER TABLE facts ADD COLUMN endorsements INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE facts ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
     ],
 }
 

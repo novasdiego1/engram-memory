@@ -94,35 +94,14 @@ def main(ctx: click.Context) -> None:
             ctx.invoke(main.commands[action])  # type: ignore[attr-defined]
         return
 
-    # Connected — determine mode label
-    if ws and ws.server_url and not ws.db_url:
-        mode_label = "hosted"
-        mode_color = "green"
-    elif ws and ws.db_url:
-        mode_label = "team · PostgreSQL"
-        mode_color = "cyan"
-    else:
-        mode_label = "local · SQLite"
-        mode_color = "blue"
-
-    workspace_id = (ws.engram_id if ws else os.environ.get("ENGRAM_DB_URL", "")[:24]) or "-"
-
-    console.print()
-    console.print(
-        _Panel(
-            _Text.assemble(
-                ("Engram", "bold white"),
-                ("  ·  ", "dim"),
-                (mode_label, mode_color + " bold"),
-                ("  ·  ", "dim"),
-                (workspace_id, "dim white"),
-            ),
-            border_style="dim",
-            padding=(0, 2),
-        )
-    )
-
     if not interactive:
+        workspace_id = (ws.engram_id if ws else os.environ.get("ENGRAM_DB_URL", "")[:24]) or "-"
+        if ws and ws.server_url and not ws.db_url:
+            mode_label = "hosted"
+        elif ws and ws.db_url:
+            mode_label = "team · PostgreSQL"
+        else:
+            mode_label = "local · SQLite"
         click.echo(f"Engram  connected  [{mode_label}]  {workspace_id}")
         click.echo()
         click.echo("  engram conflicts  — review open memory conflicts")
@@ -131,46 +110,9 @@ def main(ctx: click.Context) -> None:
         click.echo("  engram --help     — all commands")
         return
 
-    _MENU_STYLE = questionary.Style(
-        [
-            ("selected", "fg:#00aaff bold"),
-            ("pointer", "fg:#00aaff bold"),
-            ("highlighted", "fg:#00aaff"),
-            ("instruction", "dim"),
-        ]
-    )
+    from engram.tui import run_tui
 
-    action = questionary.select(
-        "What would you like to do?",
-        choices=[
-            questionary.Choice("conflicts     — review open memory conflicts", "conflicts"),
-            questionary.Choice("search        — query workspace memory", "search"),
-            questionary.Choice("tail          — stream live workspace facts", "tail"),
-            questionary.Choice("status        — workspace info", "status"),
-            questionary.Choice("whoami        — show identity", "whoami"),
-            questionary.Choice("export        — export workspace data", "export"),
-            questionary.Choice("help          — all commands", "help"),
-            questionary.Choice("quit", "quit"),
-        ],
-        use_shortcuts=False,
-        style=_MENU_STYLE,
-        instruction="(↑↓ to move, Enter to select)",
-    ).ask()
-
-    if action is None or action == "quit":
-        return
-    if action == "help":
-        click.echo(ctx.get_help())
-        return
-    if action == "search":
-        query = questionary.text(
-            "Search query:",
-            style=_MENU_STYLE,
-        ).ask()
-        if query and query.strip():
-            ctx.invoke(main.commands["search"], topic=query.strip())  # type: ignore[attr-defined]
-        return
-    ctx.invoke(main.commands[action])  # type: ignore[attr-defined]
+    run_tui(ws, ctx)
 
 
 # ── engram install ───────────────────────────────────────────────────
