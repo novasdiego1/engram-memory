@@ -106,12 +106,23 @@ def run_tui(ws: Any, ctx: Any) -> None:
 
     def header_text() -> AnyFormattedText:
         lines = [
-            [("class:header.logo", _LOGO[0]), ("class:header.title", "   Engram "), ("class:header.version", f"v{_VERSION}")],
-            [("class:header.logo", _LOGO[1]), ("class:header.mode", f"   {mode_label} "), ("class:header.id", f"· {workspace_id}")],
+            [
+                ("class:header.logo", _LOGO[0]),
+                ("class:header.title", "   Engram "),
+                ("class:header.version", f"v{_VERSION}"),
+            ],
+            [
+                ("class:header.logo", _LOGO[1]),
+                ("class:header.mode", f"   {mode_label} "),
+                ("class:header.id", f"· {workspace_id}"),
+            ],
             [("class:header.logo", _LOGO[2]), ("class:header.cwd", f"   {cwd}")],
-            [("class:header.logo", _LOGO[3]), ("class:header.tagline", "   Shared memory for engineering teams")]
+            [
+                ("class:header.logo", _LOGO[3]),
+                ("class:header.tagline", "   Shared memory for engineering teams"),
+            ],
         ]
-        
+
         result: list[tuple[str, str]] = []
         for line in lines:
             result.extend(line)
