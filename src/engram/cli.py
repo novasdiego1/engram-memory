@@ -1979,6 +1979,7 @@ def conflicts_list(status: str, limit: int) -> None:
 
     db_url = os.getenv("ENGRAM_DB_URL")
     if db_url:
+        from engram.postgres_storage import PostgresStorage
         storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
     else:
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
@@ -2042,6 +2043,7 @@ def conflicts_resolve(conflict_id: str, resolution: str, winning_fact: str | Non
 
     db_url = os.getenv("ENGRAM_DB_URL")
     if db_url:
+        from engram.postgres_storage import PostgresStorage
         storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
     else:
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
@@ -2051,7 +2053,7 @@ def conflicts_resolve(conflict_id: str, resolution: str, winning_fact: str | Non
     async def run_resolve():
         await storage.connect()
         try:
-            result = await engine.resolve(
+            await engine.resolve(
                 conflict_id=conflict_id,
                 resolution_type=resolution,
                 resolution=resolution,
