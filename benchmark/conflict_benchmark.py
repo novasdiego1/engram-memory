@@ -21,7 +21,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from engram.storage import SQLiteStorage
 from engram.engine import EngramEngine
@@ -68,7 +68,7 @@ class BenchmarkSuite:
             "name": self.name,
             "version": self.version,
             "description": self.description,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "results": [r.to_dict() for r in self.results],
             "summary": self.compute_summary(),
             "metadata": self.metadata,
