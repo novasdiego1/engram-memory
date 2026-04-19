@@ -1831,14 +1831,12 @@ async def engram_chat(
     if engine is None:
         return {"error": "Engine not initialized"}
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"error": "ANTHROPIC_API_KEY is not set on the server."}
-
-    try:
-        import anthropic
-    except ImportError:
-        return {"error": "anthropic package not installed on server."}
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not anthropic_key and not openai_key:
+        return {
+            "error": "No AI API key configured on server. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your Vercel environment variables."
+        }
 
     # Gather context: open conflicts + relevant memory facts
     conflicts = await engine.get_conflicts(status="open")
@@ -1887,12 +1885,31 @@ async def engram_chat(
     messages: list[dict[str, str]] = list(history or [])
     messages.append({"role": "user", "content": message})
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-    response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=256,
-        system=system,
-        messages=messages,
-    )
-    reply = response.content[0].text.strip()
+    if anthropic_key:
+        try:
+            import anthropic
+        except ImportError:
+            return {"error": "anthropic package not installed on server."}
+        client = anthropic.AsyncAnthropic(api_key=anthropic_key)
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            system=system,
+            messages=messages,
+        )
+        reply = response.content[0].text.strip()
+    else:
+        try:
+            import openai
+        except ImportError:
+            return {"error": "openai package not installed on server."}
+        oa_client = openai.AsyncOpenAI(api_key=openai_key)
+        oa_messages = [{"role": "system", "content": system}] + messages
+        oa_response = await oa_client.chat.completions.create(
+            model="gpt-4o-mini",
+            max_tokens=256,
+            messages=oa_messages,
+        )
+        reply = (oa_response.choices[0].message.content or "").strip()
+
     return {"reply": reply}

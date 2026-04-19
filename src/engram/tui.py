@@ -224,6 +224,12 @@ def _openai_chat(
             "engram_chat",
             {"message": message, "history": history or []},
         )
+        if isinstance(result, dict) and result.get("error"):
+            output_lines.append(("class:output.dim", "\n"))
+            output_lines.append(("class:output.warn", f"  ⚠ {result['error']}\n"))
+            output_lines.append(("class:output.dim", "\n"))
+            return None
+
         reply = (result or {}).get("reply") if isinstance(result, dict) else None
 
         if reply:
