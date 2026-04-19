@@ -233,7 +233,6 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
-                Window(),  # pushes output down toward input
                 Window(
                     FormattedTextControl(
                         output_text,
@@ -256,6 +255,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
+                Window(),  # pushes output and input to top, toolbar to bottom
                 Window(
                     FormattedTextControl(toolbar_text, focusable=False),
                     height=D.exact(1),
