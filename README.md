@@ -4,19 +4,13 @@
 
 **Active memory for your AI agents — outlasting sessions, never sleeping**
 
-Most agent errors aren't disagreements between agents. They're disagreements between the agent and reality. Engram verifies what agents believe against what the code actually says.
+Most agent errors aren't disagreements between agents. They're disagreements between the agent and code. Engram verifies what agents believe exist and what the code actually says.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![Python](https://img.shields.io/badge/python-3.11+-3776ab?style=flat-square)](https://python.org)
 
 </div>
-
----
-
-## North Star
-
-Engram's north star isn't agent consensus — it's agent accuracy. The hardest bugs to catch aren't when agent A says X and agent B says Y. They're when an agent is confident about something that isn't true — a config value it misread, a file it thinks it created, a migration it believes it ran. Engram treats the codebase as the source of truth and catches the gap between what agents believe and what the code actually reflects.
 
 ---
 
@@ -33,6 +27,10 @@ You can add team members and every agent on the workspace shares the same memory
 Conflict detection for AI agents is as foundational as accounting was for finance. Accounting didn't just track money — it created the liability infrastructure that made the entire financial economy possible.
 
 When agents make consequential decisions, someone has to be accountable. Engram creates a verifiable audit trail — every instruction, every committed fact, every contradiction surfaced — so liability lands on the organizations deploying agents.
+
+## North Star
+
+Most agent errors aren't disagreements between agents. They're disagreements between the agent and code. Engram verifies what agents believe exist and what the code actually says.
 
 ### Demo Video
 
