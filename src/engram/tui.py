@@ -741,6 +741,11 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     dont_extend_height=True,
                 ),
                 Window(
+                    FormattedTextControl(separator_text, focusable=False),
+                    height=D.exact(1),
+                    dont_extend_height=True,
+                ),
+                Window(
                     FormattedTextControl(tabs_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
