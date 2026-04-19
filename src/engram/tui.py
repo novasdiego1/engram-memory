@@ -225,14 +225,27 @@ def _openai_chat(
             {"message": message, "history": history or []},
         )
         reply = (result or {}).get("reply") if isinstance(result, dict) else None
+
         if reply:
             output_lines.append(("class:output.dim", "\n"))
             for line in reply.splitlines():
                 output_lines.append(("class:output.ai", f"  {line}\n"))
             output_lines.append(("class:output.dim", "\n"))
+            return reply
+
+        # engram_chat not yet available on this server — fall back to memory query
+        qresult = _mcp_call(ws, "engram_query", {"topic": message, "limit": 5})
+        facts = (qresult or {}).get("facts", []) if isinstance(qresult, dict) else []
+        output_lines.append(("class:output.dim", "\n"))
+        if facts:
+            for f in facts:
+                content = (f.get("content") or "").strip()
+                agent = f.get("agent_id") or "agent"
+                output_lines.append(("class:output.ai", f"  {content}\n"))
+                output_lines.append(("class:output.dim", f"  — {agent}\n\n"))
         else:
-            output_lines.append(("class:output.dim", "  (no response from server)\n\n"))
-        return reply
+            output_lines.append(("class:output.dim", "  Nothing in memory on that topic yet.\n\n"))
+        return None
 
     base = _server_url(ws)
     output_lines.append(("class:output.dim", "  Thinking...\n"))
