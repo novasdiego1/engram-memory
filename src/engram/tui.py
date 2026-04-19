@@ -163,6 +163,21 @@ def _is_hosted(ws: Any) -> bool:
     return not base.startswith("http://localhost") and not base.startswith("http://127.")
 
 
+def _parse_mcp_response(data: Any) -> Any | None:
+    """Extract the tool result from a parsed MCP JSON-RPC response dict."""
+    try:
+        content = (data.get("result") or {}).get("content", [])
+        if content:
+            text = content[0].get("text", "")
+            try:
+                return json.loads(text)
+            except Exception:
+                return {"reply": text} if text else None
+    except Exception:
+        pass
+    return data.get("result")
+
+
 def _mcp_call(ws: Any, tool: str, arguments: dict[str, Any]) -> Any | None:
     """Call an MCP tool via JSON-RPC POST to <server>/mcp.  Returns the result or None."""
     base = _server_url(ws)
@@ -176,17 +191,27 @@ def _mcp_call(ws: Any, tool: str, arguments: dict[str, Any]) -> Any | None:
         "method": "tools/call",
         "params": {"name": tool, "arguments": arguments},
     }
-    status, data = _http_post(f"{base}/mcp", body, timeout=10, headers=auth)
+    status, data = _http_post(f"{base}/mcp", body, timeout=15, headers=auth)
     if status != 200:
         return None
-    # MCP responses wrap the result in data.result.content[0].text (JSON string)
-    try:
-        content = data.get("result", {}).get("content", [])
-        if content:
-            return json.loads(content[0].get("text", "{}"))
-    except Exception:
-        pass
-    return data.get("result")
+
+    # When the server returns text/event-stream (SSE), _http_post can't JSON-parse
+    # the raw body and stashes it in {"error": "<raw text>"}. Extract data: lines.
+    if isinstance(data, dict) and "error" in data and "result" not in data:
+        raw_text = data["error"]
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if line.startswith("data:"):
+                payload = line[5:].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                try:
+                    data = json.loads(payload)
+                    break
+                except Exception:
+                    continue
+
+    return _parse_mcp_response(data)
 
 
 # ── OpenAI chat proxied through Engram server ─────────────────────────
