@@ -1229,8 +1229,9 @@ async function confirmDelete() {
     });
     const d = await r.json();
     if (!r.ok) { errEl.textContent = d.error || 'Delete failed.'; errEl.style.display = 'block'; return; }
+    const deletedId = _deleteWsId;
     closeDeleteModal();
-    SESSION.workspaces = (SESSION.workspaces || []).filter(w => w.engram_id !== _deleteWsId);
+    SESSION.workspaces = (SESSION.workspaces || []).filter(w => w.engram_id !== deletedId);
     renderWsGrid(SESSION.workspaces);
   } catch(e) {
     errEl.textContent = 'Connection error — please try again.';
