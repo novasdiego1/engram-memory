@@ -214,8 +214,21 @@ def _commit_user_message(ws: Any, message: str) -> None:
 def _openai_chat(ws: Any, message: str, output_lines: list[tuple[str, str]]) -> None:
     """Send message to the server /api/chat endpoint (server holds the API key)."""
     if _is_hosted(ws):
+        # Commit this message as a fact, then query for related memories
+        _mcp_call(
+            ws,
+            "engram_commit",
+            {
+                "content": message,
+                "agent_id": "tui-user",
+                "scope": "global",
+                "confidence": 0.9,
+                "fact_type": "observation",
+            },
+        )
+        output_lines.append(("class:output.dim", "  ✓ Saved to memory.\n\n"))
+
         result = _mcp_call(ws, "engram_query", {"topic": message, "limit": 5})
-        output_lines.append(("class:output.dim", "\n"))
         facts = (result or {}).get("facts", []) if isinstance(result, dict) else []
         if facts:
             for f in facts:
@@ -575,11 +588,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
             output_lines.clear()
             return
 
-        # Auto-commit every message as an Engram fact (in background)
         import threading
         import time
 
-        threading.Thread(target=_commit_user_message, args=(ws, text), daemon=True).start()
+        # For local mode, commit in background via REST API
+        if not _is_hosted(ws):
+            threading.Thread(target=_commit_user_message, args=(ws, text), daemon=True).start()
 
         def _trigger_scan(a: Application) -> None:
             if state["scanning"] or state["scan_paused"]:
