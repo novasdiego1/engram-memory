@@ -92,7 +92,7 @@ _LOCAL_SERVER = "http://localhost:7474"
 # ── server API helpers ────────────────────────────────────────────────
 
 
-def _http_get(url: str, timeout: int = 5) -> Any | None:
+def _http_get(url: str, timeout: int = 5, headers: dict[str, str] | None = None) -> Any | None:
     """GET url, return parsed JSON or None on any error."""
     try:
         parsed = urllib.parse.urlparse(url)
@@ -104,7 +104,11 @@ def _http_get(url: str, timeout: int = 5) -> Any | None:
             conn = http.client.HTTPSConnection(host, port, timeout=timeout)
         else:
             conn = http.client.HTTPConnection(host, port, timeout=timeout)
-        conn.request("GET", parsed.path + (f"?{parsed.query}" if parsed.query else ""))
+        conn.request(
+            "GET",
+            parsed.path + (f"?{parsed.query}" if parsed.query else ""),
+            headers=headers or {},
+        )
         resp = conn.getresponse()
         if resp.status == 200:
             return json.loads(resp.read())
@@ -113,7 +117,12 @@ def _http_get(url: str, timeout: int = 5) -> Any | None:
     return None
 
 
-def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, Any]:
+def _http_post(
+    url: str,
+    body: dict[str, Any],
+    timeout: int = 5,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, Any]:
     """POST JSON body to url, return (status_code, parsed_json)."""
     try:
         parsed = urllib.parse.urlparse(url)
@@ -126,12 +135,10 @@ def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, A
             conn = http.client.HTTPSConnection(host, port, timeout=timeout)
         else:
             conn = http.client.HTTPConnection(host, port, timeout=timeout)
-        conn.request(
-            "POST",
-            parsed.path,
-            raw,
-            {"Content-Type": "application/json", "Content-Length": str(len(raw))},
-        )
+        req_headers = {"Content-Type": "application/json", "Content-Length": str(len(raw))}
+        if headers:
+            req_headers.update(headers)
+        conn.request("POST", parsed.path, raw, req_headers)
         resp = conn.getresponse()
         raw_body = resp.read()
         try:
@@ -156,6 +163,9 @@ def _server_url(ws: Any) -> str:
 def _commit_user_message(ws: Any, message: str) -> None:
     """Commit the user's typed message as an Engram fact."""
     base = _server_url(ws)
+    auth: dict[str, str] = {}
+    if getattr(ws, "invite_key", ""):
+        auth["Authorization"] = f"Bearer {ws.invite_key}"
     _http_post(
         f"{base}/api/commit",
         {
@@ -166,6 +176,7 @@ def _commit_user_message(ws: Any, message: str) -> None:
             "fact_type": "observation",
         },
         timeout=8,
+        headers=auth,
     )
 
 
@@ -251,24 +262,16 @@ def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
 def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
     """Fetch open conflicts from the server and append formatted output."""
     base = _server_url(ws)
-    data = _http_get(f"{base}/api/conflicts?status=open", timeout=8)
+    auth_headers: dict[str, str] = {}
+    if ws and getattr(ws, "invite_key", ""):
+        auth_headers["Authorization"] = f"Bearer {ws.invite_key}"
+    data = _http_get(f"{base}/api/conflicts?status=open", timeout=8, headers=auth_headers)
 
     if data is None:
-        if ws and ws.server_url and not (ws.db_url or "localhost" in base):
-            output_lines.append(
-                (
-                    "class:output.dim",
-                    "  ✓ Connected — view conflicts at engram-memory.com/dashboard\n",
-                )
-            )
-        else:
-            output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
-            output_lines.append(
-                (
-                    "class:output.dim",
-                    "  Run `engram serve --http` locally or check your connection.\n",
-                )
-            )
+        output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
+        output_lines.append(
+            ("class:output.dim", "  Run `engram serve --http` locally or check your connection.\n")
+        )
         return
 
     output_lines.extend(_format_conflicts(data if isinstance(data, list) else []))
@@ -536,6 +539,9 @@ def run_tui(ws: Any, ctx: Any) -> None:
 
             state["scanning"] = True
             facts_committed = 0
+            scan_auth: dict[str, str] = {}
+            if getattr(ws, "invite_key", ""):
+                scan_auth["Authorization"] = f"Bearer {ws.invite_key}"
 
             def _spin(n: int) -> None:
                 for _ in range(n):
@@ -554,6 +560,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
                         "confidence": 0.8,
                         "fact_type": "observation",
                     },
+                    headers=scan_auth,
                     timeout=5,
                 )
                 if s == 200:

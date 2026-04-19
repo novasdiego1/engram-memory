@@ -1684,4 +1684,35 @@ async def handle_mcp(request: Request) -> Response:
         return JSONResponse(resp)
 
 
-app = Starlette(routes=[Route("/{path:path}", handle_mcp, methods=["POST", "GET"])])
+async def handle_rest_conflicts(request: Request) -> Response:
+    """GET /api/conflicts?status=open — REST shortcut for the TUI and CLI."""
+    workspace_id = await _auth_workspace(request)
+    if not workspace_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    status_filter = request.query_params.get("status", "open")
+    scope = request.query_params.get("scope") or None
+    pool = await _get_pool()
+    result = await _tool_conflicts(workspace_id, pool, scope=scope, status=status_filter)
+    conflicts = result.get("conflicts", [])
+    # Reshape to match the format the TUI's _format_conflicts() expects
+    out = []
+    for c in conflicts:
+        out.append(
+            {
+                "conflict_id": c.get("id", ""),
+                "explanation": c.get("explanation", ""),
+                "severity": c.get("severity", "medium"),
+                "status": c.get("status", "open"),
+                "fact_a": {"content": c.get("content_a", ""), "scope": c.get("scope_a", "")},
+                "fact_b": {"content": c.get("content_b", ""), "scope": c.get("scope_b", "")},
+            }
+        )
+    return JSONResponse(out)
+
+
+app = Starlette(
+    routes=[
+        Route("/api/conflicts", handle_rest_conflicts, methods=["GET"]),
+        Route("/{path:path}", handle_mcp, methods=["POST", "GET"]),
+    ]
+)

@@ -38,6 +38,7 @@ class WorkspaceConfig:
     display_name: str = ""
     description: str = ""
     server_url: str = ""
+    invite_key: str = ""
 
 
 def read_workspace() -> WorkspaceConfig | None:
@@ -93,7 +94,7 @@ def _read_credentials_as_workspace() -> WorkspaceConfig | None:
             engram_id = payload.get("engram_id", "hosted") or "hosted"
         except Exception:
             pass
-    return WorkspaceConfig(engram_id=engram_id, server_url=server_url)
+    return WorkspaceConfig(engram_id=engram_id, server_url=server_url, invite_key=invite_key)
 
 
 def write_workspace(config: WorkspaceConfig) -> None:
