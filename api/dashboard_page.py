@@ -2170,7 +2170,7 @@ function renderBilling(b) {
 
   const planDefs = [
     { key:'free',    name:'Free',    price:'$0',  hours:'1 hr/day',  desc:'On-demand scanning'              },
-    { key:'builder', name:'Builder', price:'$12', hours:'2 hrs/day', desc:'Nightly scan + morning briefing' },
+    { key:'builder', name:'Builder', price:'$12', hours:'4 hrs/day', desc:'Nightly scan + morning briefing' },
     { key:'team',    name:'Team',    price:'$39', hours:'8 hrs/day', desc:'Real-time file watching'         },
     { key:'scale',   name:'Scale',   price:'$99', hours:'24 hrs/day',desc:'Always-on, org-wide'             },
   ];
