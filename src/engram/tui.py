@@ -1,61 +1,96 @@
-"""Engram TUI — minimal box-style memory capture interface."""
+"""Claude Code-style full-screen interactive TUI for Engram."""
 
 from __future__ import annotations
 
 import http.client
 import json
-import threading
-import time
+import os
+import subprocess
+import sys
 import urllib.parse
 from typing import Any
 
 from prompt_toolkit import Application
-from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.cursor_shapes import CursorShape
 from prompt_toolkit.formatted_text import AnyFormattedText
-from prompt_toolkit.formatted_text.utils import fragment_list_width
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.processors import BeforeInput
+from prompt_toolkit.layout.screen import Point
 from prompt_toolkit.styles import Style
 
-_LOCAL_SERVER = "http://localhost:7474"
-
-_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-
-_CATEGORIES = [
-    ("About you", "Tell me something about yourself your agents should remember"),
-    ("About the codebase", "Tell me something about this codebase worth knowing"),
-    ("Goals", "What should your agents help you achieve?"),
-]
-
-_DEFAULT_QUESTION = "Tell me something your agents should always remember"
+_VERSION = "0.1.1"
 
 _STYLE = Style.from_dict(
     {
-        "border": "#555555",
-        "border.title": "bold #ffffff",
-        "status.ok": "bold #00dd55",
-        "status.warn": "bold #ffaa00",
-        "status.loading": "#555555",
-        "question": "#88ddff",
-        "flash.ok": "bold #00dd55",
-        "flash.err": "bold #ff5555",
-        "tab": "#444444",
-        "tab.selected": "bold #ffffff",
-        "input.prefix": "#555555",
+        "header.title": "bold noinherit #ffffff",
+        "header.version": "noinherit #555555",
+        "header.mode": "bold noinherit #00dd55",
+        "header.id": "noinherit #555555",
+        "header.cwd": "noinherit #555555",
+        "header.tagline": "noinherit #ff8800",
+        "header.logo": "bold noinherit #00dd55",
+        "separator": "noinherit #333333",
+        "prompt": "bold noinherit #00dd55",
+        "output": "noinherit #cccccc",
+        "output.cmd": "bold noinherit #00dd55",
+        "output.error": "noinherit #ff5555",
+        "output.dim": "noinherit #555555",
+        "output.warn": "noinherit #ffaa00",
+        "output.label": "bold noinherit #00dd55",
+        "output.ai": "noinherit #88ddff",
+        "toolbar": "noinherit bg:#111111 #444444",
+        "toolbar.key": "noinherit bg:#111111 #00dd55",
+        "toolbar.sep": "noinherit bg:#111111 #333333",
     }
 )
 
+_VALID_COMMANDS = {
+    "conflicts",
+    "resolve",
+    "search",
+    "status",
+    "whoami",
+    "export",
+    "info",
+    "stats",
+    "verify",
+    "doctor",
+    "merge",
+}
 
-# ── HTTP helpers ──────────────────────────────────────────────────────
+_HELP_LINES: list[tuple[str, str]] = [
+    ("class:output.dim", "\n"),
+    ("class:output", "  Commands:\n"),
+    ("class:output", "    conflicts                           — refresh conflict list\n"),
+    (
+        "class:output",
+        "    merge                               — merge with another person's memory\n",
+    ),
+    ("class:output", "    clear                               — clear output  (Ctrl+L)\n"),
+    ("class:output", "    quit / q                            — exit          (Ctrl+C)\n"),
+    ("class:output.dim", "\n"),
+    (
+        "class:output.dim",
+        "  Any other text is sent to the AI with your full fact corpus as context.\n",
+    ),
+    ("class:output.dim", "  Every message you send is also saved as an Engram memory.\n"),
+    ("class:output.dim", "\n"),
+]
+
+# Default local server address — matches `engram serve --http`
+_LOCAL_SERVER = "http://localhost:7474"
+
+
+# ── server API helpers ────────────────────────────────────────────────
 
 
 def _http_get(url: str, timeout: int = 5) -> Any | None:
+    """GET url, return parsed JSON or None on any error."""
     try:
         parsed = urllib.parse.urlparse(url)
         use_https = parsed.scheme == "https"
@@ -76,6 +111,7 @@ def _http_get(url: str, timeout: int = 5) -> Any | None:
 
 
 def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, Any]:
+    """POST JSON body to url, return (status_code, parsed_json)."""
     try:
         parsed = urllib.parse.urlparse(url)
         raw = json.dumps(body).encode()
@@ -105,186 +141,454 @@ def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, A
 
 
 def _server_url(ws: Any) -> str:
+    """Return the server base URL to use for API calls."""
     if ws and ws.server_url:
         return ws.server_url.rstrip("/")
     return _LOCAL_SERVER
 
 
-# ── TUI ───────────────────────────────────────────────────────────────
+# ── OpenAI chat proxied through Engram server ─────────────────────────
+
+
+def _commit_user_message(ws: Any, message: str) -> None:
+    """Commit the user's typed message as an Engram fact."""
+    base = _server_url(ws)
+    _http_post(
+        f"{base}/api/commit",
+        {
+            "content": message,
+            "agent_id": "tui-user",
+            "scope": "global",
+            "confidence": 0.9,
+            "fact_type": "observation",
+        },
+        timeout=8,
+    )
+
+
+def _openai_chat(ws: Any, message: str, output_lines: list[tuple[str, str]]) -> None:
+    """Send message to the server /api/chat endpoint (server holds the API key)."""
+    base = _server_url(ws)
+    output_lines.append(("class:output.dim", "  Thinking...\n"))
+
+    status, data = _http_post(
+        f"{base}/api/chat",
+        {"message": message},
+        timeout=35,
+    )
+
+    if status == 0:
+        output_lines.append(("class:output.error", f"  Server unreachable: {data.get('error')}\n"))
+        return
+
+    if status == 503:
+        output_lines.append(("class:output.error", "  AI chat is not configured on this server.\n"))
+        return
+
+    if status != 200:
+        err = data.get("error", f"HTTP {status}")
+        output_lines.append(("class:output.error", f"  Error: {err}\n"))
+        return
+
+    reply = data.get("reply", "")
+    output_lines.append(("class:output.dim", "\n"))
+    for line in reply.splitlines():
+        output_lines.append(("class:output.ai", f"  {line}\n"))
+    output_lines.append(("class:output.dim", "\n"))
+
+
+# ── conflict display helpers ──────────────────────────────────────────
+
+_SEV_COLOURS = {"high": "class:output.error", "medium": "class:output.warn", "low": "class:output"}
+
+
+def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Render a numbered conflict list for the TUI output area."""
+    lines: list[tuple[str, str]] = []
+    if not conflicts:
+        lines.append(("class:output.dim", "  ✓ No conflicts found.\n"))
+        return lines
+
+    lines.append(
+        ("class:output", f"  {len(conflicts)} open conflict(s) — shared with dashboard:\n\n")
+    )
+    for i, c in enumerate(conflicts, 1):
+        cid = (c.get("conflict_id") or c.get("id") or "")[:16]
+        short = cid[:8]
+        explanation = c.get("explanation") or "Conflicting information detected"
+        severity = c.get("severity", "medium")
+        sev_style = _SEV_COLOURS.get(severity, "class:output")
+
+        fa = c.get("fact_a") or {}
+        fb = c.get("fact_b") or {}
+        fa_content = (fa.get("content") or c.get("fact_a_content") or "")[:90]
+        fb_content = (fb.get("content") or c.get("fact_b_content") or "")[:90]
+        fa_scope = fa.get("scope") or c.get("fact_a_scope") or ""
+        fb_scope = fb.get("scope") or c.get("fact_b_scope") or ""
+
+        lines.append(("class:output.label", f"  [{i}] "))
+        lines.append((sev_style, f"[{severity}] "))
+        lines.append(("class:output.dim", f"id:{short}\n"))
+        lines.append(("class:output", f"      {explanation}\n"))
+        if fa_content:
+            scope_tag = f" ({fa_scope})" if fa_scope else ""
+            lines.append(("class:output.dim", f"      A{scope_tag}: {fa_content}\n"))
+        if fb_content:
+            scope_tag = f" ({fb_scope})" if fb_scope else ""
+            lines.append(("class:output.dim", f"      B{scope_tag}: {fb_content}\n"))
+        lines.append(("class:output.dim", "\n"))
+
+    lines.append(("class:output.dim", "  Changes sync instantly with the web dashboard.\n"))
+    return lines
+
+
+# ── conflict fetch / resolve via server ───────────────────────────────
+
+
+def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
+    """Fetch open conflicts from the server and append formatted output."""
+    base = _server_url(ws)
+    data = _http_get(f"{base}/api/conflicts?status=open", timeout=8)
+
+    if data is None:
+        output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
+        output_lines.append(
+            ("class:output.dim", "  Run `engram serve --http` locally or check your connection.\n")
+        )
+        return
+
+    output_lines.extend(_format_conflicts(data if isinstance(data, list) else []))
+
+
+def _resolve_conflict(
+    ws: Any,
+    conflict_id: str,
+    resolution_type: str,
+    output_lines: list[tuple[str, str]],
+) -> None:
+    """Resolve a conflict via the server API and report the result."""
+    base = _server_url(ws)
+
+    _aliases = {
+        "keep_a": "winner",
+        "keep_b": "winner",
+        "dismiss": "dismissed",
+        "dismissed": "dismissed",
+        "winner": "winner",
+        "merge": "merge",
+    }
+    resolution_type_norm = _aliases.get(resolution_type.lower(), resolution_type.lower())
+    if resolution_type_norm not in ("winner", "merge", "dismissed"):
+        output_lines.append(
+            (
+                "class:output.error",
+                f"  Unknown resolution '{resolution_type}'. Use keep_a, keep_b, or dismiss.\n",
+            )
+        )
+        return
+
+    winning_claim_id: str | None = None
+    if resolution_type.lower() in ("keep_a", "keep_b"):
+        data = _http_get(f"{base}/api/conflicts?status=open")
+        if isinstance(data, list):
+            for c in data:
+                cid = c.get("conflict_id") or c.get("id") or ""
+                if cid.startswith(conflict_id):
+                    if resolution_type.lower() == "keep_a":
+                        fa = c.get("fact_a") or {}
+                        winning_claim_id = fa.get("fact_id") or fa.get("id") or c.get("fact_a_id")
+                    else:
+                        fb = c.get("fact_b") or {}
+                        winning_claim_id = fb.get("fact_id") or fb.get("id") or c.get("fact_b_id")
+                    conflict_id = cid
+                    break
+
+    note = f"Resolved via TUI ({resolution_type})"
+    payload: dict[str, Any] = {
+        "conflict_id": conflict_id,
+        "resolution_type": resolution_type_norm,
+        "resolution": note,
+    }
+    if winning_claim_id:
+        payload["winning_claim_id"] = winning_claim_id
+
+    status, result = _http_post(f"{base}/api/resolve", payload)
+
+    if status == 0:
+        output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
+        _run_engram_command("resolve", f"{conflict_id} {resolution_type_norm} {note}", output_lines)
+        return
+
+    if status != 200:
+        err = result.get("error") or result.get("detail") or f"HTTP {status}"
+        output_lines.append(("class:output.error", f"  Resolve failed: {err}\n"))
+        return
+
+    output_lines.append(
+        ("class:output.label", f"  ✓ Conflict {conflict_id[:8]} resolved ({resolution_type}).\n")
+    )
+    output_lines.append(("class:output.dim", "  Dashboard will reflect this immediately.\n"))
+
+
+# ── merge (join another workspace) ────────────────────────────────────
+
+
+def _handle_merge_invite_key(invite_key: str, output_lines: list[tuple[str, str]]) -> None:
+    """Run `engram join <invite_key>` to merge with another person's memory space."""
+    if not invite_key.strip():
+        output_lines.append(("class:output.error", "  No invite key provided. Merge cancelled.\n"))
+        return
+
+    output_lines.append(("class:output.dim", "  Joining workspace...\n"))
+    _run_engram_command("join", invite_key.strip(), output_lines)
 
 
 def run_tui(ws: Any, ctx: Any) -> None:
-    """Launch the Engram memory capture TUI."""
-    state: dict[str, Any] = {
-        "conflicts": [],
-        "conflicts_loaded": False,
-        "selected_category": -1,
-        "flash": "",
-        "flash_style": "class:flash.ok",
-        "spinner_frame": 0,
-        "scanning": True,
-    }
+    """Launch the Claude Code-style interactive shell."""
+    if ws.server_url and not ws.db_url:
+        mode_label = "hosted"
+    elif ws.db_url:
+        mode_label = "team · PostgreSQL"
+    else:
+        mode_label = "local · SQLite"
+
+    workspace_id = ws.engram_id or "-"
+    try:
+        rel = os.path.relpath(os.getcwd(), os.path.expanduser("~"))
+        cwd = "~/" + rel if not rel.startswith("..") else os.getcwd()
+    except ValueError:
+        cwd = os.getcwd()
+
+    # Mutable state
+    state: dict[str, Any] = {}
+    output_lines: list[tuple[str, str]] = []
+
+    # ── formatted text producers ──────────────────────────────────────────
+
+    _LOGO_OPEN = [
+        "  ▄████▄  ",
+        " ██▄██▄██ ",
+        " ███▀▀███ ",
+        " ▀ ▀  ▀ ▀ ",
+    ]
+    _LOGO_CLOSED = [
+        "  ▄████▄  ",
+        " ████████ ",
+        " ███▀▀███ ",
+        " ▀ ▀  ▀ ▀ ",
+    ]
+
+    def header_text() -> AnyFormattedText:
+        logo = _LOGO_OPEN if state.get("eyes", "open") == "open" else _LOGO_CLOSED
+        lines = [
+            [
+                ("class:header.logo", logo[0]),
+                ("class:header.title", "   Engram "),
+                ("class:header.version", f"v{_VERSION}"),
+            ],
+            [
+                ("class:header.logo", logo[1]),
+                ("class:header.mode", f"   {mode_label} "),
+                ("class:header.id", f"· {workspace_id}"),
+            ],
+            [("class:header.logo", logo[2]), ("class:header.cwd", f"   {cwd}")],
+            [
+                ("class:header.logo", logo[3]),
+                ("class:header.tagline", "   Shared memory for AI agents"),
+            ],
+        ]
+
+        result: list[tuple[str, str]] = []
+        for line in lines:
+            result.extend(line)
+            result.append(("", "\n"))
+        return result
+
+    def separator_text() -> AnyFormattedText:
+        return [("class:separator", "─" * 200)]
+
+    def output_text() -> AnyFormattedText:
+        return list(output_lines)
+
+    def output_cursor_pos() -> Point:
+        total = sum(t.count("\n") for _, t in output_lines)
+        return Point(x=0, y=max(0, total - 1))
+
+    def toolbar_text() -> AnyFormattedText:
+        if state.get("waiting_for_invite_key"):
+            return [
+                ("class:toolbar", "  "),
+                ("class:toolbar.key", "Paste invite key and press Enter"),
+                ("class:toolbar.sep", "   ·   "),
+                ("class:toolbar.key", "Ctrl+C"),
+                ("class:toolbar", " cancel"),
+                ("class:toolbar", "  "),
+            ]
+        return [
+            ("class:toolbar", "  "),
+            ("class:toolbar.key", "conflicts"),
+            ("class:toolbar", " refresh"),
+            ("class:toolbar.sep", "   ·   "),
+            ("class:toolbar.key", "merge"),
+            ("class:toolbar", " join another memory space"),
+            ("class:toolbar.sep", "   ·   "),
+            ("class:toolbar.key", "?"),
+            ("class:toolbar", " help"),
+            ("class:toolbar.sep", "   ·   "),
+            ("class:toolbar.key", "Ctrl+C"),
+            ("class:toolbar", " quit"),
+            ("class:toolbar", "  "),
+        ]
+
+    # ── input & key handling ──────────────────────────────────────────────
 
     input_buf = Buffer(name="main_input", multiline=False)
 
-    def _w() -> int:
-        try:
-            return get_app().output.get_size().columns
-        except Exception:
-            import shutil
+    def run_cmd(cmd: str, arg: str, app: Application) -> None:
+        output_lines.append(("class:output.cmd", f"\n  > {cmd}{' ' + arg if arg else ''}\n"))
+        _run_engram_command(cmd, arg, output_lines)
+        app.invalidate()
 
-            return shutil.get_terminal_size().columns
-
-    def _content_line(parts: list[tuple[str, str]]) -> AnyFormattedText:
-        w = _w()
-        content_len = fragment_list_width(parts)
-        pad = max(0, w - 4 - content_len)  # 4 = len("│  ") + len("│")
-        return [("class:border", "│  "), *parts, ("", " " * pad), ("class:border", "│\n")]
-
-    def top_border() -> AnyFormattedText:
-        w = _w()
-        title = "Engram"
-        dashes = max(0, w - len(title) - 5)
-        return [
-            ("class:border", "┌─ "),
-            ("class:border.title", title),
-            ("class:border", " " + "─" * dashes + "┐\n"),
-        ]
-
-    def bottom_border() -> AnyFormattedText:
-        w = _w()
-        return [("class:border", "└" + "─" * (w - 2) + "┘\n")]
-
-    def blank_line() -> AnyFormattedText:
-        return _content_line([])
-
-    def status_line() -> AnyFormattedText:
-        if state["flash"]:
-            return _content_line([(state["flash_style"], state["flash"])])
-        if state["scanning"]:
-            frame = _SPINNER[state["spinner_frame"] % len(_SPINNER)]
-            return _content_line(
-                [
-                    ("class:status.loading", f"{frame} "),
-                    ("class:status.loading", "Scanning codebase..."),
-                ]
-            )
-        n = len(state["conflicts"])
-        if n == 0:
-            return _content_line([("class:status.ok", "✓ No conflicts")])
-        label = f"⚠  {n} conflict{'s' if n != 1 else ''}"
-        return _content_line([("class:status.warn", label)])
-
-    def question_line() -> AnyFormattedText:
-        cat_idx = state["selected_category"]
-        q = _CATEGORIES[cat_idx][1] if cat_idx >= 0 else _DEFAULT_QUESTION
-        return _content_line([("class:question", f"💬  {q}")])
-
-    def tabs_line() -> AnyFormattedText:
-        parts: list[tuple[str, str]] = []
-        for i, (name, _) in enumerate(_CATEGORIES):
-            if i > 0:
-                parts.append(("", "  "))
-            style = "class:tab.selected" if i == state["selected_category"] else "class:tab"
-            parts.append((style, f"[ {name} ]"))
-        return _content_line(parts)
-
-    # ── key bindings ──────────────────────────────────────────────────
-
-    kb = KeyBindings()
-
-    @kb.add("tab")
-    def _next_cat(event: Any) -> None:
-        n = len(_CATEGORIES)
-        state["selected_category"] = (state["selected_category"] + 1) % n
-        event.app.invalidate()
-
-    @kb.add("s-tab")
-    def _prev_cat(event: Any) -> None:
-        n = len(_CATEGORIES)
-        cur = state["selected_category"]
-        state["selected_category"] = (cur - 1) % n if cur >= 0 else n - 1
-        event.app.invalidate()
-
-    @kb.add("enter")
-    def _submit(event: Any) -> None:
-        text = input_buf.text.strip()
-        input_buf.reset()
+    def handle_command(text: str, app: Application) -> None:
+        text = text.strip()
         if not text:
             return
 
-        cat_idx = state["selected_category"]
-        scope = _CATEGORIES[cat_idx][0].lower().replace(" ", "_") if cat_idx >= 0 else "global"
-        app = event.app
+        # Handle invite key input for merge flow
+        if state.get("waiting_for_invite_key"):
+            state.pop("waiting_for_invite_key")
+            output_lines.append(("class:output.cmd", "\n  > [invite key entered]\n"))
+            _handle_merge_invite_key(text, output_lines)
+            app.invalidate()
+            return
 
-        def _do_commit() -> None:
-            base = _server_url(ws)
-            status, _ = _http_post(
-                f"{base}/api/commit",
-                {
-                    "content": text,
-                    "agent_id": "tui-user",
-                    "scope": scope,
-                    "confidence": 0.9,
-                    "fact_type": "observation",
-                },
-                timeout=8,
+        output_lines.append(("class:output.cmd", f"\n  > {text}\n"))
+        parts = text.split(None, 2)
+        cmd = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+        extra = parts[2] if len(parts) > 2 else ""
+
+        if cmd in ("quit", "exit", "q"):
+            app.exit()
+            return
+        if cmd in ("?", "help"):
+            output_lines.extend(_HELP_LINES)
+            return
+        if cmd == "clear":
+            output_lines.clear()
+            return
+
+        # Auto-commit every message as an Engram fact (in background)
+        import threading
+
+        threading.Thread(target=_commit_user_message, args=(ws, text), daemon=True).start()
+
+        if cmd == "merge":
+            output_lines.append(
+                ("class:output.label", "  engram merge — join another memory space\n\n")
             )
-            if status == 200:
-                state["flash"] = "✓ Saved"
-                state["flash_style"] = "class:flash.ok"
-            else:
-                state["flash"] = "✗ Could not reach server — is `engram serve --http` running?"
-                state["flash_style"] = "class:flash.err"
+            output_lines.append(
+                ("class:output", "  Enter the invite key from the other workspace:\n")
+            )
+            state["waiting_for_invite_key"] = True
             app.invalidate()
-            time.sleep(2)
-            state["flash"] = ""
-            app.invalidate()
+            return
 
-        threading.Thread(target=_do_commit, daemon=True).start()
+        if cmd == "conflicts":
+            _load_conflicts(ws, output_lines)
+        elif cmd == "resolve":
+            if not arg:
+                output_lines.append(
+                    ("class:output.error", "  Usage: resolve <id> keep_a|keep_b|dismiss\n")
+                )
+            else:
+                resolution = extra or "dismissed"
+                _resolve_conflict(ws, arg, resolution, output_lines)
+                output_lines.append(("class:output.dim", "\n"))
+                _load_conflicts(ws, output_lines)
+        elif cmd == "search" and not arg:
+            output_lines.append(("class:output.error", "  Usage: search <query>\n"))
+        elif cmd in _VALID_COMMANDS:
+            _run_engram_command(cmd, arg + (" " + extra if extra else ""), output_lines)
+        else:
+            # Unknown command → treat as free-text chat with OpenAI + fact corpus
+            _openai_chat(ws, text, output_lines)
+
+        app.invalidate()
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _enter(event: Any) -> None:
+        text = input_buf.text
+        input_buf.reset()
+        handle_command(text, event.app)
 
     @kb.add("c-c")
     @kb.add("c-d")
     def _exit(event: Any) -> None:
-        event.app.exit()
+        if state.get("waiting_for_invite_key"):
+            state.pop("waiting_for_invite_key")
+            output_lines.append(("class:output.dim", "  Merge cancelled.\n"))
+            event.app.invalidate()
+        else:
+            event.app.exit()
 
-    # ── layout ────────────────────────────────────────────────────────
+    @kb.add("c-l")
+    def _clear(event: Any) -> None:
+        output_lines.clear()
+        event.app.invalidate()
+
+    @kb.add("c-r")
+    def _refresh(event: Any) -> None:
+        output_lines.append(("class:output.cmd", "\n  > conflicts\n"))
+        _load_conflicts(ws, output_lines)
+        event.app.invalidate()
+
+    # ── layout ────────────────────────────────────────────────────────────
 
     layout = Layout(
         HSplit(
             [
                 Window(
-                    FormattedTextControl(top_border), height=D.exact(1), dont_extend_height=True
+                    FormattedTextControl(header_text, focusable=False),
+                    height=D.exact(4),
+                    dont_extend_height=True,
                 ),
                 Window(
-                    FormattedTextControl(status_line), height=D.exact(1), dont_extend_height=True
+                    FormattedTextControl(separator_text, focusable=False),
+                    height=D.exact(1),
+                    dont_extend_height=True,
                 ),
                 Window(
-                    FormattedTextControl(blank_line), height=D.exact(1), dont_extend_height=True
+                    FormattedTextControl(
+                        output_text,
+                        get_cursor_position=output_cursor_pos,
+                        focusable=False,
+                    ),
+                    wrap_lines=True,
+                    dont_extend_height=True,
                 ),
                 Window(
-                    FormattedTextControl(question_line),
+                    FormattedTextControl(separator_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
                 Window(
                     BufferControl(
-                        input_buf,
-                        input_processors=[BeforeInput("│  > ", style="class:input.prefix")],
+                        buffer=input_buf,
+                        input_processors=[BeforeInput("> ", style="class:prompt")],
                     ),
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
+                Window(),  # pushes output and input to top, toolbar to bottom
                 Window(
-                    FormattedTextControl(blank_line), height=D.exact(1), dont_extend_height=True
-                ),
-                Window(FormattedTextControl(tabs_line), height=D.exact(1), dont_extend_height=True),
-                Window(
-                    FormattedTextControl(bottom_border),
+                    FormattedTextControl(toolbar_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
+                    style="class:toolbar",
                 ),
-                Window(),  # spacer fills remaining terminal height
             ]
         ),
         focused_element=input_buf,
@@ -299,24 +603,57 @@ def run_tui(ws: Any, ctx: Any) -> None:
         mouse_support=False,
     )
 
-    def _spinner_loop() -> None:
-        while state["scanning"]:
-            time.sleep(0.08)
-            state["spinner_frame"] += 1
-            try:
-                app.invalidate()
-            except Exception:
-                break
+    import threading
+    import time
 
-    def _load_conflicts() -> None:
-        base = _server_url(ws)
-        data = _http_get(f"{base}/api/conflicts?status=open", timeout=8)
-        state["conflicts_loaded"] = True
-        state["scanning"] = False
-        state["conflicts"] = data if isinstance(data, list) else []
-        app.invalidate()
+    def _blink() -> None:
+        while True:
+            time.sleep(3)
+            state["eyes"] = "closed"
+            app.invalidate()
+            time.sleep(0.15)
+            state["eyes"] = "open"
+            app.invalidate()
 
-    threading.Thread(target=_spinner_loop, daemon=True).start()
-    threading.Thread(target=_load_conflicts, daemon=True).start()
+    threading.Thread(target=_blink, daemon=True).start()
+
+    # Load conflicts immediately on startup
+    _load_conflicts(ws, output_lines)
 
     app.run()
+
+
+# ── command runner ─────────────────────────────────────────────────────
+
+
+def _run_engram_command(cmd: str, arg: str, output_lines: list[tuple[str, str]]) -> None:
+    engram_bin = _find_engram_bin()
+    cli_args = [engram_bin, cmd]
+    if arg:
+        cli_args.extend(arg.split())
+
+    try:
+        result = subprocess.run(cli_args, capture_output=True, text=True, timeout=30)
+        combined = (result.stdout + result.stderr).strip()
+        if combined in ("[]", "{}", ""):
+            output_lines.append(("class:output.dim", f"  No {cmd} found.\n"))
+        elif combined:
+            err = result.returncode != 0
+            for line in combined.splitlines():
+                style = "class:output.error" if err else "class:output"
+                output_lines.append((style, f"  {line}\n"))
+        else:
+            output_lines.append(("class:output.dim", f"  No output from {cmd}.\n"))
+    except subprocess.TimeoutExpired:
+        output_lines.append(("class:output.error", "  Command timed out after 30s\n"))
+    except FileNotFoundError:
+        output_lines.append(("class:output.error", f"  Could not find: {engram_bin}\n"))
+    except Exception as e:
+        output_lines.append(("class:output.error", f"  Error: {e}\n"))
+
+
+def _find_engram_bin() -> str:
+    argv0 = sys.argv[0]
+    if os.path.isfile(argv0) and os.access(argv0, os.X_OK):
+        return argv0
+    return "engram"
