@@ -512,13 +512,14 @@ def run_tui(ws: Any, ctx: Any) -> None:
             if state["scanning"] or state["scan_paused"]:
                 return
             base = _server_url(ws)
-            billing = _http_get(
-                f"{base}/billing/status?engram_id={ws.engram_id or ''}", timeout=3
-            )
+            billing = _http_get(f"{base}/billing/status?engram_id={ws.engram_id or ''}", timeout=3)
             if billing and billing.get("paused"):
                 state["scan_paused"] = True
                 output_lines.append(
-                    ("class:output.warn", "  ⏸ Active scanning paused — upgrade for more active hours.\n")
+                    (
+                        "class:output.warn",
+                        "  ⏸ Active scanning paused — upgrade for more active hours.\n",
+                    )
                 )
                 a.invalidate()
                 return
