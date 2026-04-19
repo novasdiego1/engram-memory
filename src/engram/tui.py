@@ -534,13 +534,88 @@ def run_tui(ws: Any, ctx: Any) -> None:
                 )
                 a.invalidate()
                 return
+
             state["scanning"] = True
-            for _ in range(35):
-                time.sleep(0.08)
-                state["scan_frame"] += 1
+            facts_committed = 0
+
+            def _spin(n: int) -> None:
+                for _ in range(n):
+                    time.sleep(0.08)
+                    state["scan_frame"] += 1
+                    a.invalidate()
+
+            def _commit_fact(content: str) -> bool:
+                nonlocal facts_committed
+                s, _ = _http_post(
+                    f"{base}/api/commit",
+                    {
+                        "content": content,
+                        "agent_id": "tui-scanner",
+                        "scope": "codebase",
+                        "confidence": 0.8,
+                        "fact_type": "observation",
+                    },
+                    timeout=5,
+                )
+                if s == 200:
+                    facts_committed += 1
+                    return True
+                return False
+
+            # Commit recent git activity
+            _spin(5)
+            try:
+                r = subprocess.run(
+                    ["git", "log", "--oneline", "-8"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if r.stdout.strip():
+                    _commit_fact(f"Recent git commits:\n{r.stdout.strip()}")
+            except Exception:
+                pass
+
+            # Scan recently modified files
+            _spin(4)
+            changed: list[str] = []
+            try:
+                r = subprocess.run(
+                    ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                changed = [f.strip() for f in r.stdout.splitlines() if f.strip()][:6]
+            except Exception:
+                pass
+
+            for filepath in changed:
+                _spin(4)
+                output_lines.append(("class:output.dim", f"  ↳ {filepath}\n"))
                 a.invalidate()
+                full_path = os.path.join(os.getcwd(), filepath)
+                if not os.path.isfile(full_path):
+                    continue
+                try:
+                    with open(full_path, errors="replace") as fh:
+                        preview = fh.read(400).strip()
+                    first_lines = " · ".join(
+                        ln.strip() for ln in preview.splitlines()[:4] if ln.strip()
+                    )[:200]
+                    _commit_fact(f"{filepath}: {first_lines}")
+                except Exception:
+                    pass
+
+            _spin(5)
             state["scanning"] = False
-            output_lines.append(("class:output.dim", "  ✓ Codebase scan complete.\n"))
+            noun = "fact" if facts_committed == 1 else "facts"
+            output_lines.append(
+                (
+                    "class:output.dim",
+                    f"  ✓ Scan complete — {facts_committed} {noun} committed.\n",
+                )
+            )
             a.invalidate()
 
         threading.Thread(target=_trigger_scan, args=(app,), daemon=True).start()
