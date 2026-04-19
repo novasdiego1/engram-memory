@@ -875,9 +875,7 @@ async def handle_delete_account(request: Request) -> JSONResponse:
                     await conn.execute(
                         f"DELETE FROM {SCHEMA}.workspace_keys WHERE engram_id = $1", eid
                     )
-                    await conn.execute(
-                        f"DELETE FROM {SCHEMA}.workspaces WHERE engram_id = $1", eid
-                    )
+                    await conn.execute(f"DELETE FROM {SCHEMA}.workspaces WHERE engram_id = $1", eid)
 
             # Delete the user record
             await conn.execute(f"DELETE FROM {SCHEMA}.users WHERE id = $1", user_id)
