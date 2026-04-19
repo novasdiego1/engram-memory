@@ -19,6 +19,7 @@ DEPRECATION_POLICY = {
     "compatibility": "current_major_and_previous_major_when_available",
 }
 
+
 @dataclass(frozen=True)
 class DeprecatedParameter:
     tool: str

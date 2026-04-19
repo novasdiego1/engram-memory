@@ -935,7 +935,9 @@ def install(dry_run: bool) -> None:
     if kiro_hook_written:
         click.echo("⚡ Auto-commit hook installed: every Kiro message → Engram")
     if git_pre_commit_written:
-        click.echo("⚡ Git pre-commit hook installed: blocks commits with unresolved Engram conflicts")
+        click.echo(
+            "⚡ Git pre-commit hook installed: blocks commits with unresolved Engram conflicts"
+        )
     if project_mcp_written:
         click.echo(
             "🔑 Project MCP override written: .claude/settings.local.json → correct workspace"
