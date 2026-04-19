@@ -489,7 +489,10 @@ def run_tui(ws: Any, ctx: Any) -> None:
 
     def tabs_text() -> AnyFormattedText:
         return [
-            ("class:output.dim", "  Resolve conflicts, or tell me something your agents should always remember"),
+            (
+                "class:output.dim",
+                "  Resolve conflicts, or tell me something your agents should always remember",
+            ),
         ]
 
     def toolbar_text() -> AnyFormattedText:
