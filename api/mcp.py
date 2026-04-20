@@ -1475,9 +1475,7 @@ async def _tool_chat(
             if resp.status_code != 200:
                 return {"error": f"OpenAI API error: {resp.status_code}"}
             data = resp.json()
-            reply = (
-                (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
-            )
+            reply = (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
 
     return {"reply": reply}
 
