@@ -687,9 +687,9 @@ def _render_landing() -> str:
 <section class="graph-hero reveal" id="dashboard">
   <div class="container" style="text-align:center;">
     <div class="section-label">Dashboard</div>
-    <h2 class="graph-hero-title">View your memory graph</h2>
+    <h2 class="graph-hero-title">Create your workspace</h2>
     <p class="graph-hero-desc">
-      See everything your agents know. Browse facts, resolve conflicts, track agents, and explore lineage chains — all in one place.
+      Set up a shared workspace for your team in seconds. Every agent connects to the same memory automatically.
     </p>
     <a href="/dashboard" class="hero-cta" style="margin-top:32px;">
       Open Dashboard
