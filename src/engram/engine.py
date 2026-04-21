@@ -1825,31 +1825,76 @@ class EngramEngine:
                 },
             )
         )
-        # Record auto-resolution as a queryable fact
-        try:
-            content_a = (fact_a.get("content") or "")[:150]
-            content_b = (fact_b.get("content") or "")[:150]
-            resolution_fact = (
-                f"[Conflict Resolved] Auto-resolved evolution: same-agent self-correction. "
-                f"Newer fact {winner_id[:12]} kept, older fact {loser_id[:12]} retired. "
-                f"| Fact A: {content_a} | Fact B: {content_b}"
-            )
-            await self.commit(
-                content=resolution_fact,
-                scope=fact_a.get("scope", "general"),
-                confidence=1.0,
-                agent_id="engram-resolver",
-                fact_type="decision",
-                durability="durable",
-            )
-        except Exception:
-            logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+        winner_fact = fact_a if winner_id == fact_a["id"] else fact_b
+        loser_fact = fact_b if winner_id == fact_a["id"] else fact_a
+        await self._commit_resolution_fact(
+            scope=fact_a.get("scope", "general"),
+            resolution_type="winner",
+            winner_fact=winner_fact,
+            loser_fact=loser_fact,
+            reason="Same agent self-corrected — newer belief supersedes older one.",
+        )
         logger.info(
             "Auto-resolved evolution conflict %s: winner=%s loser=%s",
             conflict_id[:12],
             winner_id[:12],
             loser_id[:12],
         )
+
+    async def _commit_resolution_fact(
+        self,
+        scope: str,
+        resolution_type: str,
+        reason: str,
+        winner_fact: dict[str, Any] | None = None,
+        loser_fact: dict[str, Any] | None = None,
+        fact_a: dict[str, Any] | None = None,
+        fact_b: dict[str, Any] | None = None,
+        conflict_explanation: str | None = None,
+    ) -> None:
+        """Commit a human-readable resolution record as a queryable fact.
+
+        Agents querying memory before making decisions will see these facts
+        alongside regular facts — providing a full resolution audit trail.
+        """
+        try:
+            if resolution_type == "winner" and winner_fact and loser_fact:
+                # Only embed the accepted content — including the superseded value
+                # in the fact body would trigger false conflict detection against the winner.
+                accepted = (winner_fact.get("content") or "")[:200]
+                winner_agent = winner_fact.get("agent_id", "unknown")
+                loser_agent = loser_fact.get("agent_id", "unknown")
+                content = (
+                    f"[Engram Resolution] Accepted: \"{accepted}\" "
+                    f"(from {winner_agent}, superseded claim by {loser_agent}). "
+                    f"Reason: {reason}"
+                )
+            elif resolution_type == "merge" and fact_a and fact_b:
+                ca = (fact_a.get("content") or "")[:120]
+                cb = (fact_b.get("content") or "")[:120]
+                content = (
+                    f"[Engram Resolution] Both facts treated as complementary truths. "
+                    f'"{ca}" and "{cb}". Reason: {reason}'
+                )
+            else:
+                ca = ((fact_a or {}).get("content") or "")[:120]
+                cb = ((fact_b or {}).get("content") or "")[:120]
+                content = (
+                    f"[Engram Resolution] Apparent conflict dismissed as false positive. "
+                    f'"{ca}" vs "{cb}". Reason: {reason}'
+                )
+            if conflict_explanation:
+                content = f"{content}. Context: {conflict_explanation[:100]}"
+            await self.commit(
+                content=content,
+                scope=scope,
+                confidence=1.0,
+                agent_id="engram-resolver",
+                fact_type="decision",
+                durability="durable",
+            )
+        except Exception:
+            logger.debug("Failed to commit resolution fact for scope %s", scope)
 
     async def _apply_heuristic_resolution(
         self,
@@ -1880,25 +1925,20 @@ class EngramEngine:
             ),
             resolved_by="engram-auto",
         )
-        # Record heuristic resolution as a queryable fact
-        try:
-            content_a = (fact_a.get("content") or "")[:150]
-            content_b = (fact_b.get("content") or "")[:150]
-            resolution_fact = (
-                f"[Conflict Resolved] Auto-resolved by heuristic: "
-                f"fact {winner_id[:12]} preferred (higher confidence or more recent). "
-                f"| Fact A: {content_a} | Fact B: {content_b}"
-            )
-            await self.commit(
-                content=resolution_fact,
-                scope=fact_a.get("scope", "general"),
-                confidence=1.0,
-                agent_id="engram-resolver",
-                fact_type="decision",
-                durability="durable",
-            )
-        except Exception:
-            logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+        winner_fact = fact_a if winner_id == fact_a["id"] else fact_b
+        loser_fact = fact_b if winner_id == fact_a["id"] else fact_a
+        conf_reason = (
+            "Higher confidence fact preferred."
+            if (winner_fact.get("confidence") or 0) != (loser_fact.get("confidence") or 0)
+            else "Equal confidence — more recently committed fact preferred."
+        )
+        await self._commit_resolution_fact(
+            scope=fact_a.get("scope", "general"),
+            resolution_type="winner",
+            winner_fact=winner_fact,
+            loser_fact=loser_fact,
+            reason=conf_reason,
+        )
         logger.debug("Heuristic-resolved conflict %s: winner=%s", conflict_id[:12], winner_id[:12])
 
     # ── engram_resolve ───────────────────────────────────────────────
@@ -2455,26 +2495,27 @@ class EngramEngine:
                 resolution=f"[LLM] {resolution_text}",
                 resolved_by="engram-auto",
             )
-            # Record LLM resolution as a queryable fact
-            try:
-                content_a = (fact_a.get("content") or "")[:150]
-                content_b = (fact_b.get("content") or "")[:150]
-                explanation = conflict.get("explanation") or "Conflicting information"
-                resolution_fact = (
-                    f"[Conflict Resolved] {explanation} — "
-                    f"LLM resolution ({resolution_type}): {resolution_text} "
-                    f"| Fact A: {content_a} | Fact B: {content_b}"
-                )
-                await self.commit(
-                    content=resolution_fact,
-                    scope=conflict.get("scope", "general"),
-                    confidence=1.0,
-                    agent_id="engram-resolver",
-                    fact_type="decision",
-                    durability="durable",
-                )
-            except Exception:
-                logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+            reasoning = suggestion.get("suggestion_reasoning") or resolution_text
+            winner_fact = (
+                (fact_a if winning_id == fact_a["id"] else fact_b)
+                if resolution_type == "winner" and winning_id
+                else None
+            )
+            loser_fact = (
+                (fact_b if winning_id == fact_a["id"] else fact_a)
+                if resolution_type == "winner" and winning_id
+                else None
+            )
+            await self._commit_resolution_fact(
+                scope=fact_a.get("scope", "general"),
+                resolution_type=resolution_type,
+                winner_fact=winner_fact,
+                loser_fact=loser_fact,
+                fact_a=fact_a if resolution_type != "winner" else None,
+                fact_b=fact_b if resolution_type != "winner" else None,
+                reason=reasoning,
+                conflict_explanation=conflict.get("explanation"),
+            )
             logger.info("LLM-resolved conflict %s as %s", conflict_id[:12], resolution_type)
         else:
             # No LLM available — fall back to heuristic
