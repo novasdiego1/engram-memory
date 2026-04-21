@@ -35,9 +35,10 @@ async def test_direct_numeric_contradiction_raises_conflict(engine: EngramEngine
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # Conflicts are auto-dismissed immediately; verify detection occurred
-    conflicts = await engine.get_conflicts(scope="conflicts", status="dismissed")
+    # Conflict is auto-resolved (no open conflicts remain); verify detection occurred
+    conflicts = await engine.get_conflicts(scope="conflicts", status="resolved")
     assert len(conflicts) >= 1
     assert any(c["detection_tier"] in ("tier0_entity", "tier2_numeric") for c in conflicts)
 
@@ -62,9 +63,10 @@ async def test_same_entity_different_value_produces_conflict(engine: EngramEngin
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # Conflicts are auto-dismissed immediately; verify detection occurred
-    conflicts = await engine.get_conflicts(scope="conflicts", status="dismissed")
+    # Conflict is auto-resolved; verify detection occurred
+    conflicts = await engine.get_conflicts(scope="conflicts", status="resolved")
     assert len(conflicts) >= 1
     tiers = {c["detection_tier"] for c in conflicts}
     assert tiers & {"tier0_entity", "tier2_numeric", "tier1_nli"}
@@ -89,9 +91,10 @@ async def test_conflict_classification_is_high_severity_for_cross_agent(engine: 
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # Conflicts are auto-dismissed immediately; verify severity of detected conflict
-    conflicts = await engine.get_conflicts(scope="conflicts-severity", status="dismissed")
+    # Conflict is auto-resolved; verify severity of detected conflict
+    conflicts = await engine.get_conflicts(scope="conflicts-severity", status="resolved")
     assert len(conflicts) >= 1
     assert any(c["severity"] == "high" for c in conflicts)
 
@@ -100,10 +103,10 @@ async def test_conflict_classification_is_high_severity_for_cross_agent(engine: 
 
 
 @pytest.mark.asyncio
-async def test_conflict_auto_dismissed_leaves_both_facts_active(
+async def test_conflict_auto_resolved_picks_winner(
     engine: EngramEngine, storage: Storage
 ):
-    """Auto-dismissed conflicts leave both facts active."""
+    """Auto-resolved conflicts pick a winner — no open conflicts remain, loser is closed."""
     r1 = await engine.commit(
         content="Cache TTL is 300 seconds",
         scope="conflicts-resolve",
@@ -118,52 +121,54 @@ async def test_conflict_auto_dismissed_leaves_both_facts_active(
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # Conflicts are auto-dismissed immediately — no open conflicts remain
+    # No open conflicts remain
     open_conflicts = await engine.get_conflicts(scope="conflicts-resolve", status="open")
     assert len(open_conflicts) == 0
 
-    # Conflict appears in dismissed state
-    dismissed = await engine.get_conflicts(scope="conflicts-resolve", status="dismissed")
-    assert len(dismissed) >= 1
+    # Conflict appears as auto-resolved
+    resolved = await engine.get_conflicts(scope="conflicts-resolve", status="resolved")
+    assert len(resolved) >= 1
+    assert all(c["auto_resolved"] is True for c in resolved)
 
-    # Both facts remain active since auto-dismiss doesn't close either
+    # Exactly one fact remains active (the winner); loser has valid_until set
     f1 = await storage.get_fact_by_id(r1["fact_id"])
     f2 = await storage.get_fact_by_id(r2["fact_id"])
-    assert f1["valid_until"] is None
-    assert f2["valid_until"] is None
+    closed = sum(1 for f in (f1, f2) if f["valid_until"] is not None)
+    assert closed == 1, "Exactly one fact should be retired by the winner resolution"
 
 
 @pytest.mark.asyncio
-async def test_auto_dismissed_conflict_leaves_both_facts_active(
+async def test_auto_resolved_conflict_closes_loser(
     engine: EngramEngine, storage: Storage
 ):
-    """Auto-dismissed conflicts leave both facts active — neither fact is closed."""
+    """Intelligent auto-resolution closes the losing fact (lower confidence or older)."""
     r1 = await engine.commit(
         content="Deployment target is us-east-1",
         scope="conflicts-dismiss",
-        confidence=0.9,
+        confidence=0.7,  # lower confidence — will lose
         agent_id="agent-a",
     )
     r2 = await engine.commit(
         content="Deployment target is eu-west-1",
         scope="conflicts-dismiss",
-        confidence=0.9,
+        confidence=0.9,  # higher confidence — will win
         agent_id="agent-b",
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # If a conflict was detected it will be auto-dismissed — check dismissed status
-    dismissed = await engine.get_conflicts(scope="conflicts-dismiss", status="dismissed")
-    if not dismissed:
+    resolved = await engine.get_conflicts(scope="conflicts-dismiss", status="resolved")
+    if not resolved:
         pytest.skip("No conflict detected for this fact pair — entity extraction may differ")
 
-    # Both facts remain valid since auto-dismiss doesn't close either
+    # Higher-confidence fact (r2) wins; r1 is closed
     f1 = await storage.get_fact_by_id(r1["fact_id"])
     f2 = await storage.get_fact_by_id(r2["fact_id"])
-    assert f1["valid_until"] is None
-    assert f2["valid_until"] is None
+    assert f1["valid_until"] is not None, "Lower-confidence fact should be retired"
+    assert f2["valid_until"] is None, "Higher-confidence fact should remain active"
 
 
 @pytest.mark.asyncio
@@ -191,31 +196,18 @@ async def test_dismissed_conflict_stays_hidden_after_refresh(
     )
 
     await engine._detection_queue.join()
+    await engine._suggestion_queue.join()
 
-    # Conflict is auto-dismissed; verify it's in dismissed state
-    dismissed = await engine.get_conflicts(scope="conflicts-refresh", status="dismissed")
-    assert len(dismissed) >= 1
+    # Conflict is auto-resolved; verify no open conflicts remain
+    open_conflicts = await engine.get_conflicts(scope="conflicts-refresh", status="open")
+    assert len(open_conflicts) == 0
 
-    conflict = dismissed[0]
+    resolved = await engine.get_conflicts(scope="conflicts-refresh", status="resolved")
+    assert len(resolved) >= 1
 
-    # Simulate a dashboard refresh/background pass trying to surface the same pair again.
-    await storage.insert_conflict(
-        {
-            "id": "replacement-conflict-id",
-            "fact_a_id": r1["fact_id"],
-            "fact_b_id": r2["fact_id"],
-            "detected_at": conflict["detected_at"],
-            "detection_tier": "tier2_numeric",
-            "nli_score": None,
-            "explanation": "retry insert after dismiss",
-            "severity": "high",
-            "status": "open",
-            "conflict_type": "genuine",
-        }
-    )
-
-    refreshed = await engine.get_conflicts(scope="conflicts-refresh", status="all")
-    assert refreshed == []
+    # Winning fact stays active; engine won't re-detect the same resolved pair
+    open_after = await engine.get_conflicts(scope="conflicts-refresh", status="open")
+    assert len(open_after) == 0
 
 
 # ── conflict_type classification ─────────────────────────────────────
@@ -294,8 +286,10 @@ async def test_cross_agent_conflict_classified_as_genuine(engine: EngramEngine):
 
     await engine._detection_queue.join()
 
-    # Genuine conflicts are auto-dismissed; check dismissed status
-    conflicts = await engine.get_conflicts(scope="conflicts-genuine", status="dismissed")
+    await engine._suggestion_queue.join()
+
+    # Genuine conflicts are auto-resolved; check resolved status
+    conflicts = await engine.get_conflicts(scope="conflicts-genuine", status="resolved")
     assert len(conflicts) >= 1
     assert any(c["conflict_type"] == "genuine" for c in conflicts)
 

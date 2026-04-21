@@ -446,8 +446,10 @@ async def test_engine_tkg_reversal_creates_conflict(engine: EngramEngine):
     )
     await engine._detection_queue.join()
 
-    # Conflicts are auto-dismissed; verify TKG reversal was detected
-    conflicts = await engine.get_conflicts(scope="tkg-reversal", status="dismissed")
+    await engine._suggestion_queue.join()
+
+    # Conflict is auto-resolved; verify TKG reversal was detected
+    conflicts = await engine.get_conflicts(scope="tkg-reversal", status="resolved")
     tkg_conflicts = [c for c in conflicts if c["detection_tier"] == "tier3_tkg_reversal"]
     assert len(tkg_conflicts) >= 1
     assert "reversal" in tkg_conflicts[0]["explanation"].lower()

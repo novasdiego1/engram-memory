@@ -1409,7 +1409,10 @@ class EngramEngine:
                     if conflict_type == "evolution":
                         await self._auto_resolve_evolution(cid, fact, other)
                     else:
-                        await self._auto_dismiss_conflict(cid)
+                        try:
+                            self._suggestion_queue.put_nowait(cid)
+                        except asyncio.QueueFull:
+                            await self._apply_heuristic_resolution(cid, fact, other)
                     await self._fire_event(
                         "conflict.detected",
                         {
@@ -1489,7 +1492,10 @@ class EngramEngine:
                         if conflict_type == "evolution":
                             await self._auto_resolve_evolution(cid, fact, other)
                         else:
-                            await self._auto_dismiss_conflict(cid)
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                await self._apply_heuristic_resolution(cid, fact, other)
                         await self._fire_event(
                             "conflict.detected",
                             {
@@ -1570,7 +1576,10 @@ class EngramEngine:
                         if conflict_type == "evolution":
                             await self._auto_resolve_evolution(cid, fact, other)
                         else:
-                            await self._auto_dismiss_conflict(cid)
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                await self._apply_heuristic_resolution(cid, fact, other)
                         await self._fire_event(
                             "conflict.detected",
                             {
@@ -1635,7 +1644,12 @@ class EngramEngine:
                         if conflict_type == "evolution":
                             await self._auto_resolve_evolution(cid, first_fact or {}, fact)
                         else:
-                            await self._auto_dismiss_conflict(cid)
+                            try:
+                                self._suggestion_queue.put_nowait(cid)
+                            except asyncio.QueueFull:
+                                await self._apply_heuristic_resolution(
+                                    cid, first_fact or {}, fact
+                                )
                         await self._fire_event(
                             "conflict.detected",
                             {
@@ -1813,6 +1827,25 @@ class EngramEngine:
                 },
             )
         )
+        # Record auto-resolution as a queryable fact
+        try:
+            content_a = (fact_a.get("content") or "")[:150]
+            content_b = (fact_b.get("content") or "")[:150]
+            resolution_fact = (
+                f"[Conflict Resolved] Auto-resolved evolution: same-agent self-correction. "
+                f"Newer fact {winner_id[:12]} kept, older fact {loser_id[:12]} retired. "
+                f"| Fact A: {content_a} | Fact B: {content_b}"
+            )
+            await self.commit(
+                content=resolution_fact,
+                scope=fact_a.get("scope", "general"),
+                confidence=1.0,
+                agent_id="engram-resolver",
+                fact_type="decision",
+                durability="durable",
+            )
+        except Exception:
+            logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
         logger.info(
             "Auto-resolved evolution conflict %s: winner=%s loser=%s",
             conflict_id[:12],
@@ -1820,15 +1853,55 @@ class EngramEngine:
             loser_id[:12],
         )
 
-    async def _auto_dismiss_conflict(self, conflict_id: str) -> None:
-        """Auto-dismiss a detected conflict without requiring human review."""
+    async def _apply_heuristic_resolution(
+        self,
+        conflict_id: str,
+        fact_a: dict[str, Any],
+        fact_b: dict[str, Any],
+    ) -> None:
+        """Resolve a conflict without LLM: higher confidence wins; ties go to newer fact."""
+        conf_a = fact_a.get("confidence") or 0.0
+        conf_b = fact_b.get("confidence") or 0.0
+        if conf_a >= conf_b:
+            winner_id, loser_id = fact_a["id"], fact_b["id"]
+        else:
+            winner_id, loser_id = fact_b["id"], fact_a["id"]
+        if conf_a == conf_b:
+            # Equal confidence — prefer the more recent fact
+            if (fact_b.get("committed_at") or "") > (fact_a.get("committed_at") or ""):
+                winner_id, loser_id = fact_b["id"], fact_a["id"]
+
+        if loser_id:
+            await self.storage.close_validity_window(fact_id=loser_id)
         await self.storage.auto_resolve_conflict(
             conflict_id=conflict_id,
-            resolution_type="dismissed",
-            resolution="Auto-dismissed: conflict auto-resolution enabled.",
+            resolution_type="winner",
+            resolution=(
+                f"Auto-resolved by heuristic: fact {winner_id[:12]} preferred "
+                f"(higher confidence or more recent)."
+            ),
             resolved_by="engram-auto",
         )
-        logger.debug("Auto-dismissed conflict %s", conflict_id[:12])
+        # Record heuristic resolution as a queryable fact
+        try:
+            content_a = (fact_a.get("content") or "")[:150]
+            content_b = (fact_b.get("content") or "")[:150]
+            resolution_fact = (
+                f"[Conflict Resolved] Auto-resolved by heuristic: "
+                f"fact {winner_id[:12]} preferred (higher confidence or more recent). "
+                f"| Fact A: {content_a} | Fact B: {content_b}"
+            )
+            await self.commit(
+                content=resolution_fact,
+                scope=fact_a.get("scope", "general"),
+                confidence=1.0,
+                agent_id="engram-resolver",
+                fact_type="decision",
+                durability="durable",
+            )
+        except Exception:
+            logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+        logger.debug("Heuristic-resolved conflict %s: winner=%s", conflict_id[:12], winner_id[:12])
 
     # ── engram_resolve ───────────────────────────────────────────────
 
@@ -1876,6 +1949,28 @@ class EngramEngine:
         )
 
         if success:
+            # Record resolution as a queryable fact so agents can learn from past decisions
+            try:
+                fact_a_content = (conflict.get("fact_a_content") or "")[:150]
+                fact_b_content = (conflict.get("fact_b_content") or "")[:150]
+                explanation = conflict.get("explanation") or "Conflicting information"
+                resolution_fact = (
+                    f"[Conflict Resolved] {explanation} — "
+                    f"Resolution ({resolution_type}): {resolution} "
+                    f"| Fact A: {fact_a_content} "
+                    f"| Fact B: {fact_b_content}"
+                )
+                await self.commit(
+                    content=resolution_fact,
+                    scope=conflict.get("scope", "general"),
+                    confidence=1.0,
+                    agent_id="engram-resolver",
+                    fact_type="decision",
+                    durability="durable",
+                )
+            except Exception:
+                logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+
             try:
                 await self._audit("resolve", conflict_id=conflict_id)
             except Exception:
@@ -2313,7 +2408,7 @@ class EngramEngine:
             while True:
                 conflict_id = await self._suggestion_queue.get()
                 try:
-                    await self._generate_and_store_suggestion(conflict_id)
+                    await self._resolve_intelligently(conflict_id)
                 except Exception:
                     logger.exception("Suggestion generation error for conflict %s", conflict_id)
                 finally:
@@ -2321,15 +2416,17 @@ class EngramEngine:
         except asyncio.CancelledError:
             pass
 
-    async def _generate_and_store_suggestion(self, conflict_id: str) -> None:
-        """Generate an LLM suggestion for one conflict and persist it."""
+    async def _resolve_intelligently(self, conflict_id: str) -> None:
+        """Resolve a conflict automatically: LLM when available, heuristic otherwise.
+
+        With ANTHROPIC_API_KEY set, Claude picks winner/merge/dismissed and explains
+        why. Without it, the higher-confidence (or more recent) fact wins.
+        """
         from engram import suggester
 
         conflict = await self.storage.get_conflict_by_id(conflict_id)
         if not conflict or conflict["status"] != "open":
             return
-        if conflict.get("suggested_resolution"):
-            return  # already has a suggestion
 
         facts_by_id = await self.storage.get_facts_by_ids(
             [conflict["fact_a_id"], conflict["fact_b_id"]]
@@ -2340,9 +2437,54 @@ class EngramEngine:
             return
 
         suggestion = await suggester.generate_suggestion(fact_a, fact_b, conflict)
+
         if suggestion:
-            await self.storage.update_conflict_suggestion(conflict_id, **suggestion)
-            logger.debug("Suggestion stored for conflict %s", conflict_id)
+            resolution_type = suggestion["suggested_resolution_type"]
+            winning_id = suggestion.get("suggested_winning_fact_id")
+            resolution_text = suggestion.get("suggested_resolution", "Auto-resolved by Engram.")
+
+            if resolution_type == "winner" and winning_id:
+                loser_id = (
+                    fact_b["id"] if winning_id == fact_a["id"] else fact_a["id"]
+                )
+                await self.storage.close_validity_window(fact_id=loser_id)
+
+            elif resolution_type == "merge":
+                # Both facts stay active; record the merge decision
+                pass
+
+            await self.storage.auto_resolve_conflict(
+                conflict_id=conflict_id,
+                resolution_type=resolution_type,
+                resolution=f"[LLM] {resolution_text}",
+                resolved_by="engram-auto",
+            )
+            # Record LLM resolution as a queryable fact
+            try:
+                content_a = (fact_a.get("content") or "")[:150]
+                content_b = (fact_b.get("content") or "")[:150]
+                explanation = conflict.get("explanation") or "Conflicting information"
+                resolution_fact = (
+                    f"[Conflict Resolved] {explanation} — "
+                    f"LLM resolution ({resolution_type}): {resolution_text} "
+                    f"| Fact A: {content_a} | Fact B: {content_b}"
+                )
+                await self.commit(
+                    content=resolution_fact,
+                    scope=conflict.get("scope", "general"),
+                    confidence=1.0,
+                    agent_id="engram-resolver",
+                    fact_type="decision",
+                    durability="durable",
+                )
+            except Exception:
+                logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
+            logger.info(
+                "LLM-resolved conflict %s as %s", conflict_id[:12], resolution_type
+            )
+        else:
+            # No LLM available — fall back to heuristic
+            await self._apply_heuristic_resolution(conflict_id, fact_a, fact_b)
 
     # ── 72-hour escalation loop ──────────────────────────────────────
 

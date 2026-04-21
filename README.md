@@ -28,7 +28,7 @@ When agents make consequential decisions, someone has to be accountable. Engram 
 
 ## North Star
 
-Most agent errors aren't disagreements between agents. They're disagreements between the agent and code. Engram verifies what agents believe exist and what the code actually says.
+Zero bugs in AI-assisted development. Engram exists so that every agent working on your codebase shares the same verified truth — catching contradictions between what agents believe and what the code actually says before they become bugs. The goal isn't agent consensus. It's code that ships without the errors agents introduce when they lose context, misread state, or act on stale information.
 
 ### Demo Video
 
@@ -79,11 +79,9 @@ Once Engram is installed, type `engram` in any terminal to open the interactive 
 engram
 ```
 
-From here you can ask questions or talk to Engram about your workspace and resolve conflicts.
+From here you can ask questions, search memory, and inspect what Engram knows about your workspace.
 
 You can also ask your agent to merge memory spaces — it will pull durable facts from another workspace into this one automatically.
-
-You can also resolve conflicts visually at [engram-memory.com/dashboard](https://engram-memory.com/dashboard).
 
 ---
 
@@ -109,30 +107,17 @@ Facts accumulate. The next time any agent opens this codebase — yours or anyon
 
 ---
 
-## Conflict Detection
+## Conflict Resolution
 
-Engram runs conflict detection at two levels:
+Engram detects and resolves conflicts on your behalf — no manual review required.
 
-**Agent vs. agent** — Every commit triggers detection across the full fact corpus. When two agents have recorded contradictory facts, Engram surfaces the contradiction before either agent acts on stale information. It reads the workspace's commit history as a chronological story and asks: *where would a new agent get confused about what's currently true?*
+**Agent vs. agent** — Every commit triggers detection across the full fact corpus. When two agents record contradictory facts, Engram resolves the conflict automatically: it uses Claude to evaluate both facts and pick the winner, falling back to a confidence-and-recency heuristic when no API key is configured. The losing fact's validity window is closed so it no longer surfaces in queries.
 
-**Codebase vs. agent** — On startup and every 10 minutes, Engram scans your codebase — config files, dependency manifests, Dockerfiles — and compares what it finds against what agents have committed to memory. When an agent claims the rate limit is 1000 but the config says 500, that conflict is surfaced immediately.
+**Agent vs. codebase** — On startup and every 10 minutes, Engram scans your codebase — config files, dependency manifests, Dockerfiles — and compares what it finds against what agents have committed to memory. When an agent claims the rate limit is 1000 but the config says 500, the stale agent memory is resolved against the ground truth automatically.
+
+Conflicts appear in your dashboard's **Conflicts** tab with the resolution reasoning attached. Nothing sits open waiting for you.
 
 Full design: [`docs/CONFLICT_DETECTIVE.md`](./docs/CONFLICT_DETECTIVE.md)
-
-### Resolving Conflicts
-
-Conflicts are surfaced automatically. You choose how to resolve them.
-
-**Option 1 — Terminal (recommended)**
-
-```bash
-engram
-```
-
-
-**Option 2 — Web dashboard**
-
-Visit [engram-memory.com/dashboard](https://engram-memory.com/dashboard) to review and resolve conflicts in a visual interface — useful when you want to inspect the full fact lineage or manage multiple workspaces at once.
 
 ---
 
@@ -166,7 +151,7 @@ Framework integrations:
 
 ## CLI Reference
 
-Type `engram` in any terminal to open the interactive shell — it opens straight to your open conflicts with a command prompt to resolve them.
+Type `engram` in any terminal to open the interactive shell — search memory, inspect facts, and query what your agents know.
 
 ```bash
 engram                  # Open the interactive shell (conflicts, search, status, and more)
