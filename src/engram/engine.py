@@ -1865,7 +1865,7 @@ class EngramEngine:
                 winner_agent = winner_fact.get("agent_id", "unknown")
                 loser_agent = loser_fact.get("agent_id", "unknown")
                 content = (
-                    f"[Engram Resolution] Accepted: \"{accepted}\" "
+                    f'[Engram Resolution] Accepted: "{accepted}" '
                     f"(from {winner_agent}, superseded claim by {loser_agent}). "
                     f"Reason: {reason}"
                 )

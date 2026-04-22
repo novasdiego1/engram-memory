@@ -103,9 +103,7 @@ async def test_conflict_classification_is_high_severity_for_cross_agent(engine: 
 
 
 @pytest.mark.asyncio
-async def test_conflict_auto_resolved_picks_winner(
-    engine: EngramEngine, storage: Storage
-):
+async def test_conflict_auto_resolved_picks_winner(engine: EngramEngine, storage: Storage):
     """Auto-resolved conflicts pick a winner — no open conflicts remain, loser is closed."""
     r1 = await engine.commit(
         content="Cache TTL is 300 seconds",
@@ -140,9 +138,7 @@ async def test_conflict_auto_resolved_picks_winner(
 
 
 @pytest.mark.asyncio
-async def test_auto_resolved_conflict_closes_loser(
-    engine: EngramEngine, storage: Storage
-):
+async def test_auto_resolved_conflict_closes_loser(engine: EngramEngine, storage: Storage):
     """Intelligent auto-resolution closes the losing fact (lower confidence or older)."""
     r1 = await engine.commit(
         content="Deployment target is us-east-1",
