@@ -14,7 +14,19 @@ from typing import Any
 
 logger = logging.getLogger("engram")
 
-_SYSTEM = """\
+# Lazy client reused across all suggestion calls in a single process.
+_suggester_client: Any = None
+
+
+def _get_suggester_client(api_key: str) -> Any:
+    global _suggester_client
+    if _suggester_client is None:
+        import anthropic
+        _suggester_client = anthropic.AsyncAnthropic(api_key=api_key)
+    return _suggester_client
+
+
+_SYSTEM_TEXT = """\
 You are Engram's conflict resolver for a multi-agent engineering team.
 Two AI agents have committed facts that contradict each other.
 Resolve the conflict using ALL evidence provided — codebase ground truth
@@ -49,6 +61,11 @@ Resolution type guidelines:
 - Never invent facts or values not present in the input.\
 """
 
+# Cached system prompt — stable across all conflict resolution calls.
+_SYSTEM: list[dict[str, Any]] = [
+    {"type": "text", "text": _SYSTEM_TEXT, "cache_control": {"type": "ephemeral"}}
+]
+
 
 async def generate_suggestion(
     fact_a: dict[str, Any],
@@ -70,7 +87,7 @@ async def generate_suggestion(
         return None
 
     try:
-        import anthropic
+        client = _get_suggester_client(api_key)
     except ImportError:
         logger.debug("anthropic package not installed — skipping LLM suggestions")
         return None
@@ -78,7 +95,6 @@ async def generate_suggestion(
     prompt = _build_prompt(fact_a, fact_b, conflict, codebase_context, tkg_context)
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=api_key)
         message = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=512,

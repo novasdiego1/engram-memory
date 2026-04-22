@@ -15,6 +15,31 @@ from engram.engine import EngramEngine
 
 logger = logging.getLogger("engram")
 
+# Stable system prompt cached server-side across all chunk extractions in a scan.
+# cache_control fires when the prefix exceeds the model's minimum (~4096 tokens for Haiku 4.5).
+_EXTRACTION_SYSTEM: list[dict[str, Any]] = [
+    {
+        "type": "text",
+        "text": (
+            "Extract atomic, durable engineering knowledge from document chunks.\n"
+            "Return JSON only — an array of short factual strings. "
+            "Do not invent facts. Omit vague, promotional, or duplicate statements."
+        ),
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
+# Lazy client reused across all chunk calls in a single process.
+_importer_client: Any = None
+
+
+def _get_importer_client(api_key: str) -> Any:
+    global _importer_client
+    if _importer_client is None:
+        import anthropic
+        _importer_client = anthropic.AsyncAnthropic(api_key=api_key)
+    return _importer_client
+
 SUPPORTED_EXTENSIONS = {".md", ".txt"}
 SKIPPED_DIRS = {
     ".git",
@@ -117,24 +142,17 @@ async def extract_atomic_statements(chunk: str, source: str) -> list[str]:
         return _heuristic_extract_atomic_statements(chunk)
 
     try:
-        import anthropic
+        client = _get_importer_client(api_key)
     except ImportError:
         logger.debug("anthropic package not installed; using heuristic import extraction")
         return _heuristic_extract_atomic_statements(chunk)
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-    prompt = (
-        "Extract atomic, durable engineering knowledge from this document chunk.\n"
-        "Return JSON only, as an array of short factual strings. Do not invent facts. "
-        "Omit vague, promotional, or duplicate statements.\n\n"
-        f"Source: {source}\n\n"
-        f"Document chunk:\n{chunk}"
-    )
     try:
         message = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1200,
-            messages=[{"role": "user", "content": prompt}],
+            system=_EXTRACTION_SYSTEM,
+            messages=[{"role": "user", "content": f"Source: {source}\n\nDocument chunk:\n{chunk}"}],
         )
         raw = message.content[0].text.strip()
         if raw.startswith("```"):

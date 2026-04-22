@@ -17,6 +17,34 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+# Stable system prompt cached server-side; identical across every deferred scan.
+_OVERNIGHT_SYSTEM: list[dict[str, Any]] = [
+    {
+        "type": "text",
+        "text": (
+            "You are Engram's overnight synthesis agent. "
+            "Your job is to read the team's existing memory and recently changed code, "
+            "then produce 3–5 concise, factual insights that would help future agents. "
+            "Each insight should be a single sentence, starting with a capital letter. "
+            "Focus on non-obvious architectural decisions, patterns, or risks. "
+            "Output ONLY a JSON array of strings, e.g.: "
+            '["Insight one.", "Insight two."]'
+        ),
+        "cache_control": {"type": "ephemeral"},
+    }
+]
+
+# Lazy synchronous client reused across all overnight calls in a single process.
+_overnight_client: Any = None
+
+
+def _get_overnight_client(api_key: str) -> Any:
+    global _overnight_client
+    if _overnight_client is None:
+        import anthropic
+        _overnight_client = anthropic.Anthropic(api_key=api_key)
+    return _overnight_client
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -72,22 +100,26 @@ def _read_codebase_snapshot(cwd: str, max_files: int = 12) -> list[dict[str, str
     return files
 
 
-def _call_llm(system: str, user: str, model: str = "claude-haiku-4-5-20251001") -> str | None:
+def _call_llm(
+    system: str | list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    model: str = "claude-haiku-4-5-20251001",
+) -> str | None:
     """Call Anthropic API synchronously for overnight synthesis."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None
     try:
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=api_key)
+        client = _get_overnight_client(api_key)
         msg = client.messages.create(
             model=model,
             max_tokens=1024,
             system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=messages,
         )
         return msg.content[0].text if msg.content else None
+    except ImportError:
+        return None
     except Exception:
         return None
 
@@ -134,6 +166,17 @@ async def run_overnight(storage: Any, cwd: str | None = None) -> int:
         f"- {f.get('content', '')[:200]}" for f in recent_facts[:8] if f.get("content")
     )
 
+    # Build stable codebase context once — reused (and cached) across all scans in this run.
+    file_summaries = "\n\n".join(
+        f"### {f['path']}\n```\n{f['snippet']}\n```" for f in codebase_files
+    )
+    stable_parts: list[str] = []
+    if git_log:
+        stable_parts.append(f"## Recent git history\n{git_log}")
+    if file_summaries:
+        stable_parts.append(f"## Recently changed files\n{file_summaries}")
+    stable_context = "\n\n".join(stable_parts)
+
     for scan in pending:
         scan_id = scan["id"]
         await storage.update_deferred_scan_status(scan_id, "running")
@@ -145,34 +188,32 @@ async def run_overnight(storage: Any, cwd: str | None = None) -> int:
         except Exception:
             pass
 
-        file_summaries = "\n\n".join(
-            f"### {f['path']}\n```\n{f['snippet']}\n```" for f in codebase_files
-        )
-
-        system_prompt = (
-            "You are Engram's overnight synthesis agent. "
-            "Your job is to read the team's existing memory and recently changed code, "
-            "then produce 3–5 concise, factual insights that would help future agents. "
-            "Each insight should be a single sentence, starting with a capital letter. "
-            "Focus on non-obvious architectural decisions, patterns, or risks. "
-            "Output ONLY a JSON array of strings, e.g.: "
-            '["Insight one.", "Insight two."]'
-        )
-
-        user_parts = ["## Existing team memory\n" + (facts_summary or "(none)")]
-        if git_log:
-            user_parts.append(f"## Recent git history\n{git_log}")
-        if file_summaries:
-            user_parts.append(f"## Recently changed files\n{file_summaries}")
+        # Variable per-scan content follows the cached codebase block.
+        variable_parts = ["## Existing team memory\n" + (facts_summary or "(none)")]
         if payload.get("context"):
-            user_parts.append(f"## Session context\n{payload['context']}")
-        user_parts.append(
+            variable_parts.append(f"## Session context\n{payload['context']}")
+        variable_parts.append(
             "\nProduce 3–5 synthesis insights as a JSON array of strings. Be specific, not generic."
         )
-        user_msg = "\n\n".join(user_parts)
+        variable_text = "\n\n".join(variable_parts)
+
+        # Two-block user message: stable codebase context cached, per-scan content uncached.
+        user_messages: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": stable_context or "(no codebase context)",
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {"type": "text", "text": variable_text},
+                ],
+            }
+        ]
 
         insights: list[str] = []
-        raw_reply = _call_llm(system_prompt, user_msg)
+        raw_reply = _call_llm(_OVERNIGHT_SYSTEM, user_messages)
         if raw_reply:
             try:
                 start = raw_reply.find("[")
