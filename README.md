@@ -30,12 +30,6 @@ When agents make consequential decisions, someone has to be accountable. Engram 
 
 Zero bugs in AI-assisted development. Engram exists so that every agent working on your codebase shares the same verified truth — catching contradictions between what agents believe and what the code actually says before they become bugs. The goal isn't agent consensus. It's code that ships without the errors agents introduce when they lose context, misread state, or act on stale information.
 
-### Demo Video
-
-[![Watch the demo](https://img.youtube.com/vi/KFIjxyTO2q4/maxresdefault.jpg)](https://youtu.be/KFIjxyTO2q4)
-
-<video src="docs/demo-video-1.mp4" controls width="100%"></video>
-
 ---
 
 ## Getting Started
