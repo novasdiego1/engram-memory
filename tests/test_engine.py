@@ -557,10 +557,7 @@ async def test_detection_finds_numeric_conflict(engine: EngramEngine):
 
     await engine._detection_queue.join()
 
-    await engine._suggestion_queue.join()
-
-    # Conflict is auto-resolved intelligently; verify detection occurred
-    conflicts = await engine.get_conflicts(scope="auth", status="resolved")
+    conflicts = await engine.get_conflicts(scope="auth", status="open")
     assert len(conflicts) >= 1
     # Same-scope numeric entity conflicts are caught by tier0_entity (exact entity
     # name + different value in scope). tier2_numeric only fires when tier0 doesn't
@@ -586,10 +583,7 @@ async def test_detection_finds_cross_scope_numeric_conflict(engine: EngramEngine
 
     await engine._detection_queue.join()
 
-    await engine._suggestion_queue.join()
-
-    # Conflict is auto-resolved intelligently; verify detection occurred
-    conflicts = await engine.get_conflicts(status="resolved")
+    conflicts = await engine.get_conflicts(status="open")
     assert any(c["detection_tier"] == "tier2b_cross_scope" for c in conflicts)
 
 
@@ -623,10 +617,7 @@ async def test_detection_finds_semantic_nli_conflict(engine: EngramEngine, monke
 
     await engine._detection_queue.join()
 
-    await engine._suggestion_queue.join()
-
-    # Conflict is auto-resolved intelligently; verify detection occurred
-    conflicts = await engine.get_conflicts(scope="auth", status="resolved")
+    conflicts = await engine.get_conflicts(scope="auth", status="open")
     assert any(c["detection_tier"] == "tier1_nli" for c in conflicts)
 
 
@@ -904,8 +895,8 @@ async def test_query_adjacent_scopes(engine: EngramEngine):
 
 
 @pytest.mark.asyncio
-async def test_conflict_check_queued_false_on_queue_overflow(storage):
-    """When the detection queue is full, conflict_check_queued is False and detection_skipped is True."""
+async def test_conflict_check_inline_fallback_on_queue_overflow(storage):
+    """When detection queue is full, commit falls back to inline conflict detection."""
     e = EngramEngine(storage)
     # Fill detection queue to capacity without starting workers (queue stays full)
     for _ in range(e._detection_queue.maxsize):
@@ -919,4 +910,34 @@ async def test_conflict_check_queued_false_on_queue_overflow(storage):
     )
 
     assert result["conflict_check_queued"] is False
-    assert result["detection_skipped"] is True
+    assert result["conflict_check_fallback"] is True
+    assert result["detection_skipped"] is False
+
+
+@pytest.mark.asyncio
+async def test_queue_overflow_fallback_still_detects_conflicts(storage):
+    """Queue overflow fallback should still surface numeric conflicts immediately."""
+    e = EngramEngine(storage)
+
+    await e.commit(
+        content="Auth API request limit of 100 requests per minute",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-a",
+    )
+
+    for _ in range(e._detection_queue.maxsize - e._detection_queue.qsize()):
+        e._detection_queue.put_nowait("dummy-id")
+
+    result = await e.commit(
+        content="Auth API request limit of 300 requests per minute",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-b",
+    )
+
+    assert result["conflict_check_fallback"] is True
+    assert result["detection_skipped"] is False
+
+    conflicts = await e.get_conflicts(scope="auth", status="open")
+    assert any(c["detection_tier"] == "tier2_numeric" for c in conflicts)
