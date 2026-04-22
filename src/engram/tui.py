@@ -683,7 +683,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
         return [
             (
                 "class:output.dim",
-                "  Resolve conflicts, or tell me something your agents should always remember",
+                "  Tell me something your agents should remember",
             ),
         ]
 
