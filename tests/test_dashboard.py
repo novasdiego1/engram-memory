@@ -22,8 +22,6 @@ def test_render_index():
     html = _render_index(
         facts_count=42,
         total_facts=100,
-        open_conflicts=3,
-        resolved_conflicts=7,
         agents=[],
         expiring_count=2,
     )

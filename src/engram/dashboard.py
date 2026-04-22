@@ -53,8 +53,6 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
             _render_index(
                 facts_count=facts_count,
                 total_facts=total_facts,
-                open_conflicts=0,
-                resolved_conflicts=0,
                 agents=agents,
                 expiring_count=len(expiring),
                 workspace_error=workspace_error,
@@ -156,83 +154,6 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 scopes=scopes,
             )
         )
-
-    async def conflict_queue(request: Request) -> HTMLResponse:
-        scope = request.query_params.get("scope") or None
-        status = request.query_params.get("status", "open")
-        if engine is None:
-            return HTMLResponse(
-                _render_conflicts_page(
-                    [], stats={"open": 0, "resolved": 0}, scope=scope, status=status
-                )
-            )
-        conflicts = await engine.get_conflicts(scope=scope, status=status)
-        stats = {
-            "open": await storage.count_conflicts("open"),
-            "resolved": await storage.count_conflicts("resolved"),
-        }
-        return HTMLResponse(
-            _render_conflicts_page(conflicts, stats=stats, scope=scope, status=status)
-        )
-
-    async def approve_suggestion(request: Request) -> Response:
-        """HTMX: approve the LLM-suggested resolution for a conflict."""
-        conflict_id = request.path_params["conflict_id"]
-        if engine is None:
-            return HTMLResponse(
-                '<p style="color:#dc2626">Engine not available</p>', status_code=503
-            )
-        conflict = await storage.get_conflict_by_id(conflict_id)
-        if not conflict:
-            return HTMLResponse('<p style="color:#dc2626">Conflict not found</p>', status_code=404)
-        if conflict["status"] != "open":
-            full = await storage.get_conflict_with_facts(conflict_id)
-            return HTMLResponse(_render_conflict_card(full or conflict))
-
-        resolution_type = conflict.get("suggested_resolution_type") or "winner"
-        resolution = conflict.get("suggested_resolution") or "Approved via dashboard."
-        winning_id = conflict.get("suggested_winning_fact_id")
-
-        try:
-            await engine.resolve(
-                conflict_id=conflict_id,
-                resolution_type=resolution_type,
-                resolution=f"[Dashboard approved] {resolution}",
-                winning_claim_id=winning_id,
-            )
-        except Exception as exc:
-            return HTMLResponse(
-                f'<p style="color:#dc2626">Error: {_esc(str(exc))}</p>', status_code=400
-            )
-
-        updated = await storage.get_conflict_with_facts(conflict_id)
-        return HTMLResponse(_render_conflict_card(updated or conflict))
-
-    async def dismiss_conflict(request: Request) -> Response:
-        """HTMX: dismiss a conflict as a false positive."""
-        conflict_id = request.path_params["conflict_id"]
-        if engine is None:
-            return HTMLResponse(
-                '<p style="color:#dc2626">Engine not available</p>', status_code=503
-            )
-        conflict = await storage.get_conflict_by_id(conflict_id)
-        if not conflict or conflict["status"] != "open":
-            full = await storage.get_conflict_with_facts(conflict_id)
-            return HTMLResponse(_render_conflict_card(full or conflict or {}))
-
-        try:
-            await engine.resolve(
-                conflict_id=conflict_id,
-                resolution_type="dismissed",
-                resolution="Dismissed via dashboard — false positive.",
-            )
-        except Exception as exc:
-            return HTMLResponse(
-                f'<p style="color:#dc2626">Error: {_esc(str(exc))}</p>', status_code=400
-            )
-
-        updated = await storage.get_conflict_with_facts(conflict_id)
-        return HTMLResponse(_render_conflict_card(updated or conflict))
 
     async def timeline(request: Request) -> HTMLResponse:
         scope = request.query_params.get("scope") or ""
@@ -388,9 +309,6 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         Route("/dashboard/facts", knowledge_base, methods=["GET"]),
         Route("/dashboard/facts/{fact_id}", fact_detail, methods=["GET"]),
         Route("/dashboard/facts/{fact_id}/lineage", fact_lineage, methods=["GET"]),
-        Route("/dashboard/conflicts", conflict_queue, methods=["GET"]),
-        Route("/dashboard/conflicts/{conflict_id}/approve", approve_suggestion, methods=["POST"]),
-        Route("/dashboard/conflicts/{conflict_id}/dismiss", dismiss_conflict, methods=["POST"]),
         Route("/dashboard/timeline", timeline, methods=["GET"]),
         Route("/dashboard/agents", agents_view, methods=["GET"]),
         Route("/dashboard/expiring", expiring_view, methods=["GET"]),
@@ -667,12 +585,10 @@ def _dash_layout(
     <nav>
       <a href="/dashboard"{_nav_cls("overview")}>Overview</a>
       <a href="/dashboard/facts"{_nav_cls("facts")}>Knowledge Base</a>
-      <a href="/dashboard/conflicts"{_nav_cls("conflicts")}>Conflicts</a>
       <a href="/dashboard/timeline"{_nav_cls("timeline")}>Timeline</a>
       <a href="/dashboard/agents"{_nav_cls("agents")}>Agents</a>
       <a href="/dashboard/expiring"{_nav_cls("expiring")}>Expiring</a>
       <a href="/dashboard/settings"{_nav_cls("settings")}>Settings</a>
-      <a href="#" onclick="showShortcuts();return false;" style="margin-left:auto;font-size:0.75rem;color:#9ab89a;">⌨ Shortcuts</a>
     </nav>
     {body}
   </div>
@@ -683,49 +599,6 @@ def _dash_layout(
       html.classList.toggle('dark');
       localStorage.setItem('engram-theme', isDark ? 'light' : 'dark');
     }}
-    function showShortcuts() {{
-      alert('Keyboard Shortcuts:\n\n' +
-        'j/k - Navigate conflicts up/down\n' +
-        'a - Approve conflict fact A\n' +
-        'b - Approve conflict fact B\n' +
-        's - Dismiss/skip conflict\n' +
-        '? - Show this help');
-    }}
-    // Keyboard navigation for conflict queue
-    document.addEventListener('keydown', function(e) {{
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      const path = window.location.pathname;
-      if (!path.includes('/dashboard/conflicts')) return;
-      
-      const cards = document.querySelectorAll('.conflict-card');
-      if (!cards.length) return;
-      
-      let current = document.querySelector('.conflict-card.focused');
-      let idx = current ? Array.from(cards).indexOf(current) : -1;
-      
-      if (e.key === 'j') {{
-        e.preventDefault();
-        if (current) current.classList.remove('focused');
-        idx = Math.min(idx + 1, cards.length - 1);
-        cards[idx].classList.add('focused');
-        cards[idx].scrollIntoView({{behavior: 'smooth', block: 'center'}});
-      }} else if (e.key === 'k') {{
-        e.preventDefault();
-        if (current) current.classList.remove('focused');
-        idx = Math.max(idx - 1, 0);
-        cards[idx].classList.add('focused');
-        cards[idx].scrollIntoView({{behavior: 'smooth', block: 'center'}});
-      }} else if (e.key === 'a' && current) {{
-        const btn = current.querySelector('.btn-approve');
-        if (btn) {{ e.preventDefault(); btn.click(); }}
-      }} else if (e.key === 'b' && current) {{
-        const btns = current.querySelectorAll('.btn-approve, .btn-dismiss');
-        if (btns.length > 1) {{ e.preventDefault(); btns[1].click(); }}
-      }} else if (e.key === 's' && current) {{
-        const btn = current.querySelector('.btn-dismiss');
-        if (btn) {{ e.preventDefault(); btn.click(); }}
-      }}
-    }});
   </script>
 </body>
 </html>"""
@@ -734,8 +607,6 @@ def _dash_layout(
 def _render_index(
     facts_count: int,
     total_facts: int,
-    open_conflicts: int,
-    resolved_conflicts: int,
     agents: list[dict],
     expiring_count: int,
     workspace_error: str | None = None,
@@ -758,8 +629,6 @@ def _render_index(
     checklist_items = [
         ("First fact committed", facts_count > 0, "/dashboard/facts"),
         ("Teammate invited", len(agents) > 1, "/dashboard"),
-        ("First conflict detected", open_conflicts > 0, "/dashboard/conflicts"),
-        ("First conflict resolved", resolved_conflicts > 0, "/dashboard/conflicts"),
     ]
 
     all_complete = all(checked for _, checked, _ in checklist_items)
@@ -942,212 +811,6 @@ def _render_facts_table(
     {pagination}"""
     return _dash_layout(
         "Knowledge Base", body, active="facts", workspace_name=_get_workspace_name()
-    )
-
-
-def _render_conflicts_page(
-    conflicts: list[dict],
-    stats: dict | None = None,
-    scope: str | None = None,
-    status: str = "open",
-) -> str:
-    """Render the Conflicts tab."""
-    open_count = (
-        stats.get("open", 0) if stats else sum(1 for c in conflicts if c.get("status") == "open")
-    )
-    resolved_count = (
-        stats.get("resolved", 0)
-        if stats
-        else sum(1 for c in conflicts if c.get("status") == "resolved")
-    )
-
-    if not conflicts:
-        empty_html = (
-            '<div style="text-align:center;padding:4rem 1rem;color:#5a8a5a;">'
-            '<div style="font-size:2.5rem;margin-bottom:0.75rem;">✓</div>'
-            '<div style="font-size:1rem;font-weight:600;color:#1a3a1a;">No conflicts detected</div>'
-            '<div style="font-size:0.85rem;margin-top:0.4rem;">Your agents are aligned.</div>'
-            "</div>"
-        )
-        cards_html = empty_html
-    else:
-        cards_html = (
-            '<div class="conflict-cards">'
-            + "".join(_render_conflict_card(c) for c in conflicts)
-            + "</div>"
-        )
-
-    def _status_option(val: str, label: str) -> str:
-        sel = " selected" if status == val else ""
-        return f'<option value="{val}"{sel}>{label}</option>'
-
-    filter_form = f"""
-    <form method="get" action="/dashboard/conflicts" class="filter-bar">
-      <input name="scope" placeholder="Filter by scope…" value="{_esc(scope or "")}">
-      <select name="status">
-        {_status_option("open", "Open")}
-        {_status_option("resolved", "Resolved")}
-        {_status_option("dismissed", "Dismissed")}
-        {_status_option("all", "All")}
-      </select>
-      <button type="submit">Filter</button>
-    </form>"""
-
-    body = f"""
-    <div class="dash-header">
-      <div class="dash-title"><h2 style="margin:0;">Conflicts</h2></div>
-      <div style="display:flex;gap:0.5rem;">
-        <span class="badge badge-open">{open_count} open</span>
-        <span class="badge badge-resolved">{resolved_count} resolved</span>
-      </div>
-    </div>
-    {filter_form}
-    {cards_html}"""
-
-    return _dash_layout("Conflicts", body, active="conflicts", workspace_name=_get_workspace_name())
-
-
-def _render_conflict_card(c: dict) -> str:
-    """Render one conflict card. Handles both engine dicts and flat storage rows."""
-    # Normalise nested vs flat shapes
-    if "fact_a" in c:
-        fact_a = c["fact_a"]
-        fact_b = c["fact_b"]
-        cid = c.get("conflict_id", "")
-        explanation = c.get("explanation", "")
-        status = c.get("status", "open")
-        severity = c.get("severity", "high")
-        conflict_type = c.get("conflict_type", "genuine")
-        detected = (c.get("detected_at") or "")[:16]
-        resolution = c.get("resolution") or ""
-        resolution_type = c.get("resolution_type") or ""
-        suggested_text = c.get("suggested_resolution") or ""
-        suggested_type = c.get("suggested_resolution_type") or ""
-        winning_id = c.get("suggested_winning_fact_id") or ""
-        reasoning = c.get("suggestion_reasoning") or ""
-        fact_a_id = fact_a.get("fact_id", "")
-        fact_b_id = fact_b.get("fact_id", "")
-    else:
-        fact_a = {
-            "content": c.get("fact_a_content", ""),
-            "scope": c.get("fact_a_scope", ""),
-            "agent_id": c.get("fact_a_agent", ""),
-            "confidence": c.get("fact_a_confidence", 0),
-        }
-        fact_b = {
-            "content": c.get("fact_b_content", ""),
-            "scope": c.get("fact_b_scope", ""),
-            "agent_id": c.get("fact_b_agent", ""),
-            "confidence": c.get("fact_b_confidence", 0),
-        }
-        cid = c.get("id", "")
-        explanation = c.get("explanation", "")
-        status = c.get("status", "open")
-        severity = c.get("severity", "high")
-        conflict_type = c.get("conflict_type", "genuine")
-        detected = (c.get("detected_at") or "")[:16]
-        resolution = c.get("resolution") or ""
-        resolution_type = c.get("resolution_type") or ""
-        suggested_text = c.get("suggested_resolution") or ""
-        suggested_type = c.get("suggested_resolution_type") or ""
-        winning_id = c.get("suggested_winning_fact_id") or ""
-        reasoning = c.get("suggestion_reasoning") or ""
-        fact_a_id = c.get("fact_a_id", "")
-        fact_b_id = c.get("fact_b_id", "")
-
-    sev_badge_cls = {"high": "badge-high", "medium": "badge-medium", "low": "badge-low"}.get(
-        severity, "badge-low"
-    )
-    status_badge_cls = {
-        "open": "badge-open",
-        "resolved": "badge-resolved",
-        "dismissed": "badge-dismissed",
-    }.get(status, "badge-dismissed")
-    type_badge_cls = {
-        "genuine": "badge-genuine",
-        "evolution": "badge-evolution",
-        "ambiguous": "badge-ambiguous",
-    }.get(conflict_type, "badge-genuine")
-
-    def _fact_box(f: dict, label: str) -> str:
-        content = _esc(str(f.get("content") or ""))
-        scope = _esc(str(f.get("scope") or ""))
-        agent = _esc(str(f.get("agent_id") or ""))
-        return (
-            f'<div class="fact-box">'
-            f'<div class="fact-meta" style="font-weight:600;margin-bottom:0.35rem;text-transform:uppercase;font-size:0.68rem;">{label}</div>'
-            f'<div class="fact-content">{content}</div>'
-            f'<div class="fact-meta">scope: {scope} · agent: {agent}</div>'
-            f"</div>"
-        )
-
-    # Build action buttons for open conflicts
-    actions_html = ""
-    if status == "open":
-        keep_a = (
-            f'<button class="btn-approve" '
-            f'hx-post="/dashboard/conflicts/{_esc(cid)}/approve" '
-            f'hx-target="#conflict-{_esc(cid)}" hx-swap="outerHTML">Keep Fact A</button>'
-        )
-        keep_b = (
-            f'<button class="btn-approve" '
-            f'hx-post="/dashboard/conflicts/{_esc(cid)}/approve" '
-            f'hx-target="#conflict-{_esc(cid)}" hx-swap="outerHTML">Keep Fact B</button>'
-        )
-        dismiss_btn = (
-            f'<button class="btn-dismiss" '
-            f'hx-post="/dashboard/conflicts/{_esc(cid)}/dismiss" '
-            f'hx-target="#conflict-{_esc(cid)}" hx-swap="outerHTML">Dismiss</button>'
-        )
-
-        suggestion_html = ""
-        if suggested_text:
-            winning_label = ""
-            if winning_id == fact_a_id:
-                winning_label = " · keep Fact A"
-            elif winning_id == fact_b_id:
-                winning_label = " · keep Fact B"
-            suggestion_html = (
-                f'<div class="suggestion-box">'
-                f'<div class="suggestion-header">🤖 Suggested: {_esc(suggested_type)}{_esc(winning_label)}</div>'
-                f'<div class="suggestion-text">{_esc(suggested_text)}</div>'
-                f'<div class="suggestion-reasoning">{_esc(reasoning)}</div>'
-                f'<div class="suggestion-actions">'
-                f'<button class="btn-approve" '
-                f'hx-post="/dashboard/conflicts/{_esc(cid)}/approve" '
-                f'hx-target="#conflict-{_esc(cid)}" hx-swap="outerHTML">Approve suggestion</button>'
-                f"{dismiss_btn}</div></div>"
-            )
-
-        actions_html = (
-            f'<div class="suggestion-actions" style="margin-top:0.75rem;">'
-            f"{keep_a}{keep_b}{dismiss_btn}</div>"
-            f"{suggestion_html}"
-        )
-    elif resolution:
-        actions_html = (
-            f'<div class="resolution-note">'
-            f"Resolved as <strong>{_esc(resolution_type)}</strong>: {_esc(resolution)}"
-            f"</div>"
-        )
-
-    return (
-        f'<div id="conflict-{_esc(cid)}" class="conflict-card">'
-        f'<div class="conflict-header">'
-        f'<span class="badge {sev_badge_cls}">{_esc(severity)}</span>'
-        f'<span class="badge {type_badge_cls}">{_esc(conflict_type)}</span>'
-        f'<span class="conflict-id">{_esc(cid[:12])}</span>'
-        f'<span style="color:#9ab89a;font-size:0.72rem;">{_esc(detected)}</span>'
-        f'<span class="badge {status_badge_cls}" style="margin-left:auto;">{_esc(status)}</span>'
-        f"</div>"
-        f'<div class="conflict-facts">'
-        f"{_fact_box(fact_a, 'Fact A')}"
-        f'<div class="vs-divider">vs</div>'
-        f"{_fact_box(fact_b, 'Fact B')}"
-        f"</div>"
-        f'<div class="conflict-explanation">{_esc(explanation)}</div>'
-        f"{actions_html}"
-        f"</div>"
     )
 
 
