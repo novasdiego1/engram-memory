@@ -666,8 +666,7 @@ def _render_landing() -> str:
         <div class="step-content">
           <div class="step-title">Manage memory from your terminal</div>
           <div class="step-desc" style="margin-top:8px;font-size:14px;color:var(--t2);line-height:1.6;">
-            Type <code style="font-family:'JetBrains Mono',monospace;font-size:13px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);padding:2px 7px;border-radius:5px;color:var(--em4);">engram</code> in any terminal to open the interactive shell.
-            Review open conflicts, search workspace memory, stream live facts, and resolve contradictions — all without leaving your editor.
+            Type <code style="font-family:'JetBrains Mono',monospace;font-size:13px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);padding:2px 7px;border-radius:5px;color:var(--em4);">engram</code> in any terminal to search memory, stream live facts, and chat with your workspace.
           </div>
           <div class="code-block" style="margin-top:14px;">
             <button class="copy-btn" onclick="copyCode('engram-cmd', event)">Copy</button>
