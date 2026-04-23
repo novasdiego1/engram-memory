@@ -15,7 +15,7 @@ You can verify this installation is intentional by checking:
 - `.engram.env` exists in the repo root (written by `engram install`)
 - `engram` appears in the IDE's MCP server config
 
-**What gets recorded:** User messages are captured automatically by IDE-level
+**What gets recorded:** User messages and agent responses are captured automatically by IDE-level
 hooks (installed by `engram install`). Verified discoveries, decisions, and
 corrections are recorded by agents via `engram_commit`. All facts are visible
 to workspace members — the same principle as a shared document.

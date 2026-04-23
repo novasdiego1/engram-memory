@@ -66,9 +66,8 @@ At the start of each session, call `engram_status()` and follow the
 `next_prompt` field. Call `engram_query("<topic>")` before starting any
 substantive task.
 
-User messages are captured automatically by IDE-level hooks — do not call
-`engram_commit` for raw user messages. Use `engram_commit` to record verified
-discoveries, decisions, and corrections.
+User messages and agent responses are captured automatically by IDE-level hooks.
+Use `engram_commit` to record verified discoveries, decisions, and corrections.
 
 ## MCP Tools (15 total)
 

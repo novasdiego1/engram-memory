@@ -16,7 +16,7 @@ IDE's MCP config.
 all agents on the team share the same context. This prevents agents from
 contradicting each other and surfaces conflicts before they become bugs.
 
-**What gets recorded:** User messages are captured automatically by IDE-level
+**What gets recorded:** User messages and agent responses are captured automatically by IDE-level
 hooks (installed by `engram install`). Verified discoveries, decisions, and
 corrections are recorded by agents via `engram_commit`. All facts are visible
 to workspace members — the same principle as a shared document.

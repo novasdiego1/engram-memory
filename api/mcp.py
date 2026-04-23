@@ -867,9 +867,9 @@ async def _tool_status(workspace_id: str | None, pool: Any) -> dict:
         "terms_accepted": terms_accepted,
         "next_prompt": (
             "Engram is connected and ready.\n\n"
-            "User messages are captured automatically by IDE-level hooks.\n"
+            "User messages and agent responses are captured automatically by IDE-level hooks.\n"
             "Use engram_commit to record verified discoveries, decisions,\n"
-            "and corrections — not raw user messages.\n\n"
+            "and corrections.\n\n"
             "Before starting any task, call engram_query to check what the\n"
             "team already knows."
         ),
@@ -940,9 +940,9 @@ async def _tool_init(pool: Any, anonymous_mode: bool = False, anon_agents: bool 
             f"  curl -fsSL https://engram-memory.com/install | sh -s -- --join {invite_key}\n\n"
             f"For this session, pass invite_key to all Engram tool calls:\n"
             f"  invite_key: {invite_key}\n\n"
-            f"User messages are captured automatically by IDE-level hooks.\n"
+            f"User messages and agent responses are captured automatically by IDE-level hooks.\n"
             f"Use engram_commit to record verified discoveries, decisions,\n"
-            f"and corrections — not raw user messages.\n\n"
+            f"and corrections.\n\n"
             f"Dashboard: https://www.engram-memory.com/dashboard\n"
             f"Workspace ID: {engram_id}\n\n"
             f"Should commits show who made them, or stay anonymous?"
@@ -1010,9 +1010,9 @@ async def _tool_join(invite_key: str, pool: Any) -> dict:
             f"with the URL-based entry above. This switches from local to hosted Engram.\n\n"
             f"For this session, pass invite_key to all Engram tool calls:\n"
             f"  invite_key: {invite_key}\n\n"
-            f"User messages are captured automatically by IDE-level hooks.\n"
+            f"User messages and agent responses are captured automatically by IDE-level hooks.\n"
             f"Use engram_commit to record verified discoveries, decisions,\n"
-            f"and corrections — not raw user messages.\n\n"
+            f"and corrections.\n\n"
             f"Dashboard: https://www.engram-memory.com/dashboard\n"
             f"Workspace ID: {engram_id}"
         ),
@@ -1529,9 +1529,9 @@ async def _tool_accept_terms(workspace_id: str, pool: Any) -> dict:
         "status": "accepted",
         "next_prompt": (
             "Terms accepted. Thank you!\n\n"
-            "User messages are captured automatically by IDE-level hooks.\n"
+            "User messages and agent responses are captured automatically by IDE-level hooks.\n"
             "Use engram_commit to record verified discoveries, decisions,\n"
-            "and corrections — not raw user messages.\n\n"
+            "and corrections.\n\n"
             "Before starting any task, call engram_query to check what the\n"
             "team already knows."
         ),
@@ -1599,8 +1599,7 @@ _TOOLS = [
         "name": "engram_commit",
         "description": (
             "Record a verified discovery, decision, or correction to shared team memory. "
-            "Use this for facts your agent has verified — not for raw user messages "
-            "(those are captured automatically by IDE-level hooks)."
+            "Use this for facts your agent has verified."
         ),
         "inputSchema": {
             "type": "object",
@@ -1759,7 +1758,7 @@ _SERVER_INFO = {
         "Once status is 'ready': call engram_query before starting any task, "
         "check engram_conflicts before architectural decisions. "
         "Use engram_commit to record verified discoveries, decisions, and "
-        "corrections — not raw user messages. User messages are captured "
+        "corrections. User messages and agent responses are captured "
         "automatically by IDE-level hooks."
     ),
 }

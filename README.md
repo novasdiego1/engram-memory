@@ -95,7 +95,7 @@ Then repeat **Steps 3 and 4** above.
 
 ## What Gets Committed
 
-Every message you send to your AI agent is recorded in shared memory as a fact. The agent's responses are not stored — only your inputs. This gives every agent a running record of what was asked, decided, and discovered.
+Every message you send to your AI agent — and every agent response — is recorded in shared memory as a fact. This gives every agent a running record of what was asked, what was decided, and what was discovered.
 
 Facts accumulate. The next time any agent opens this codebase — yours or anyone else with workspace access — they start with the full context of everything that's been verified.
 

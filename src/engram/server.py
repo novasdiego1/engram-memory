@@ -50,8 +50,8 @@ mcp = FastMCP(
         "and engram_join — say that text to the user verbatim. Follow each prompt in sequence. "
         "Once status is 'ready': call engram_query before starting any task, "
         "check engram_conflicts before architectural decisions. "
-        "Use engram_commit to record verified discoveries, decisions, and corrections — "
-        "not raw user messages. User messages are captured automatically by IDE-level hooks."
+        "Use engram_commit to record verified discoveries, decisions, and corrections. "
+        "User messages and agent responses are captured automatically by IDE-level hooks."
     ),
 )
 
@@ -378,9 +378,9 @@ async def engram_status() -> dict[str, Any]:
             "conflict_detection": await _conflict_detection_summary(),
             "next_prompt": (
                 "Engram is connected and ready.\n\n"
-                "User messages are captured automatically by IDE-level hooks. "
+                "User messages and agent responses are captured automatically by IDE-level hooks. "
                 "Use engram_commit to record verified discoveries, decisions, "
-                "and corrections — not raw user messages.\n\n"
+                "and corrections.\n\n"
                 "Before starting any task, call engram_query to check what the "
                 "team already knows. Before architectural decisions, call "
                 "engram_conflicts to surface contradictions."
@@ -396,9 +396,9 @@ async def engram_status() -> dict[str, Any]:
             "conflict_detection": await _conflict_detection_summary(),
             "next_prompt": (
                 "Engram is connected and ready (local mode).\n\n"
-                "User messages are captured automatically by IDE-level hooks. "
+                "User messages and agent responses are captured automatically by IDE-level hooks. "
                 "Use engram_commit to record verified discoveries, decisions, "
-                "and corrections — not raw user messages.\n\n"
+                "and corrections.\n\n"
                 "Before starting any task, call engram_query to check what the "
                 "team already knows."
             ),
@@ -616,9 +616,9 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
         **result,
         "next_prompt": (
             "Connected. Your agent now has access to the team's shared memory.\n\n"
-            "User messages are captured automatically by IDE-level hooks. "
+            "User messages and agent responses are captured automatically by IDE-level hooks. "
             "Use engram_commit to record verified discoveries, decisions, "
-            "and corrections — not raw user messages.\n\n"
+            "and corrections.\n\n"
             "Before starting any task, call engram_query to check what the "
             "team already knows."
         ),
