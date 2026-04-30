@@ -164,4 +164,4 @@ To add new test scenarios:
 ## Support
 
 - GitHub Issues: https://github.com/Agentscreator/engram-memory/issues
-- Discord: https://discord.gg/engram
+- Discord: https://discord.gg/nmcyhUXX
