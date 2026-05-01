@@ -5,7 +5,8 @@ from __future__ import annotations
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
-from starlette.routing import Route
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
 
 
 def _render_landing() -> str:
@@ -19,6 +20,12 @@ def _render_landing() -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/android-chrome-192x192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/assets/android-chrome-512x512.png">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -129,15 +136,15 @@ def _render_landing() -> str:
       box-shadow: 0 0 8px var(--emerald-400);
     }
     h1 {
-      font-size: 64px; font-weight: 800; line-height: 1.08;
-      letter-spacing: -0.04em; margin-bottom: 24px;
+      font-size: 64px; font-weight: 800; line-height: 1.2;
+      letter-spacing: -0.04em; margin-bottom: 32px;
       background: linear-gradient(135deg, var(--emerald-100) 0%, var(--emerald-400) 50%, #6ee7b7 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text;
     }
     .subtitle {
       font-size: 19px; color: var(--text-secondary);
-      max-width: 560px; margin: 0 auto 48px;
+      max-width: 560px; margin: 8px auto 48px;
       line-height: 1.7; font-weight: 400;
     }
     .hero-cta {
@@ -912,4 +919,7 @@ async def landing(request: Request) -> HTMLResponse:
     return HTMLResponse(_render_landing())
 
 
-app = Starlette(routes=[Route("/{path:path}", landing, methods=["GET"])])
+app = Starlette(routes=[
+    Mount("/assets", StaticFiles(directory="assets"), name="assets"),
+    Route("/{path:path}", landing, methods=["GET"])
+])
