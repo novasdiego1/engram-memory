@@ -5,7 +5,8 @@ from __future__ import annotations
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
-from starlette.routing import Route
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
 
 
 def _render_landing() -> str:
@@ -19,6 +20,12 @@ def _render_landing() -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/assets/android-chrome-192x192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/assets/android-chrome-512x512.png">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -912,4 +919,7 @@ async def landing(request: Request) -> HTMLResponse:
     return HTMLResponse(_render_landing())
 
 
-app = Starlette(routes=[Route("/{path:path}", landing, methods=["GET"])])
+app = Starlette(routes=[
+    Mount("/assets", StaticFiles(directory="assets"), name="assets"),
+    Route("/{path:path}", landing, methods=["GET"])
+])

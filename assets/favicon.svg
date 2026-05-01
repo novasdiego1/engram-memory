@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="15" fill="#050a0e"/>
+  <g stroke="#10b981" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left brain hemisphere -->
+    <path d="M16 7c-5 0-8 4-8 9s3 6 6 7c-1 1-3 2-2 4s4 2 6 1"/>
+    <!-- Right brain hemisphere -->
+    <path d="M16 7c5 0 8 4 8 9s-3 6-6 7c1 1 3 2 2 4s-4 2-6 1"/>
+    <!-- Center line -->
+    <line x1="16" y1="7" x2="16" y2="28"/>
+    <!-- Left detail lines (touching center) -->
+    <line x1="10" y1="13" x2="16" y2="13"/>
+    <line x1="9" y1="17" x2="16" y2="17"/>
+    <line x1="10" y1="21" x2="16" y2="21"/>
+    <!-- Right detail lines (touching center) -->
+    <line x1="22" y1="13" x2="16" y2="13"/>
+    <line x1="23" y1="17" x2="16" y2="17"/>
+    <line x1="22" y1="21" x2="16" y2="21"/>
+  </g>
+</svg>
