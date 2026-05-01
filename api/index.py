@@ -919,7 +919,9 @@ async def landing(request: Request) -> HTMLResponse:
     return HTMLResponse(_render_landing())
 
 
-app = Starlette(routes=[
-    Mount("/assets", StaticFiles(directory="assets"), name="assets"),
-    Route("/{path:path}", landing, methods=["GET"])
-])
+app = Starlette(
+    routes=[
+        Mount("/assets", StaticFiles(directory="assets"), name="assets"),
+        Route("/{path:path}", landing, methods=["GET"]),
+    ]
+)
