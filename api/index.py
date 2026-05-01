@@ -136,15 +136,15 @@ def _render_landing() -> str:
       box-shadow: 0 0 8px var(--emerald-400);
     }
     h1 {
-      font-size: 64px; font-weight: 800; line-height: 1.08;
-      letter-spacing: -0.04em; margin-bottom: 24px;
+      font-size: 64px; font-weight: 800; line-height: 1.2;
+      letter-spacing: -0.04em; margin-bottom: 32px;
       background: linear-gradient(135deg, var(--emerald-100) 0%, var(--emerald-400) 50%, #6ee7b7 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text;
     }
     .subtitle {
       font-size: 19px; color: var(--text-secondary);
-      max-width: 560px; margin: 0 auto 48px;
+      max-width: 560px; margin: 8px auto 48px;
       line-height: 1.7; font-weight: 400;
     }
     .hero-cta {
