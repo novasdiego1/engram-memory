@@ -1,16 +1,18 @@
 .DEFAULT_GOAL := help
 
-PYTHON ?= python
+VENV_PYTHON ?= $(firstword $(wildcard .venv/Scripts/python.exe .venv/bin/python))
+PYTHON ?= $(if $(VENV_PYTHON),$(VENV_PYTHON),python)
 PIP ?= $(PYTHON) -m pip
 PYTEST ?= $(PYTHON) -m pytest
 RUFF ?= $(PYTHON) -m ruff
 DOCKER_COMPOSE ?= docker compose
 TEST_ARGS ?= tests/ -x --tb=short
 TEST_ALL_ARGS ?= tests/
+TEST_COV_ARGS ?= tests/ --cov=engram --cov-report=term-missing
 
 export PYTHONPATH := src
 
-.PHONY: help install install-dev test test-all lint format format-check check build clean serve docker-build docker-up docker-up-sqlite docker-up-postgres docker-down docker-logs
+.PHONY: help install install-dev test test-all test-cov lint format format-check check build clean serve docker-build docker-up docker-up-sqlite docker-up-postgres docker-down docker-logs
 
 help:
 	@echo "Engram development commands"
@@ -24,6 +26,8 @@ help:
 	@echo "  make test               Run the CI-style pytest suite"
 	@echo "                          Override with TEST_ARGS='tests/test_file.py -q'"
 	@echo "  make test-all           Run the full pytest suite without fail-fast"
+	@echo "  make test-cov           Run the full pytest suite with coverage"
+	@echo "                          Override with TEST_COV_ARGS='tests/test_file.py --cov=engram'"
 	@echo "  make lint               Run ruff lint checks"
 	@echo "  make format             Format Python files with ruff"
 	@echo "  make format-check       Check formatting without modifying files"
@@ -53,6 +57,9 @@ test:
 
 test-all:
 	$(PYTEST) $(TEST_ALL_ARGS)
+
+test-cov:
+	$(PYTEST) $(TEST_COV_ARGS)
 
 lint:
 	$(RUFF) check .
