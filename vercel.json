@@ -5,7 +5,7 @@
   "outputDirectory": ".",
   "functions": {
     "api/index.py": {
-      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,.pytest_cache/**}"
     },
     "api/mcp.py": {
       "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}",
