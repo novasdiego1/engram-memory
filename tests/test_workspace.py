@@ -1,8 +1,14 @@
 """Tests for workspace configuration and invite key cryptography."""
 
+import json
+
 import pytest
 from engram.workspace import (
+    GlobalConfig,
     WorkspaceConfig,
+    read_global_config,
+    set_global_config_setting,
+    write_global_config,
     generate_invite_key,
     decode_invite_key,
     generate_team_id,
@@ -123,3 +129,29 @@ def test_workspace_config_serialization():
     # Verify it can be reconstructed
     config2 = WorkspaceConfig(**data)
     assert config2.schema == "custom"
+
+
+def test_global_config_defaults_to_auto_init_disabled(monkeypatch, tmp_path):
+    monkeypatch.setattr("engram.workspace.GLOBAL_CONFIG_PATH", tmp_path / "config.json")
+
+    config = read_global_config()
+
+    assert config.auto_initialize_new_repos is False
+
+
+def test_global_config_roundtrip(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    monkeypatch.setattr("engram.workspace.GLOBAL_CONFIG_PATH", config_path)
+
+    write_global_config(GlobalConfig(auto_initialize_new_repos=True))
+
+    assert read_global_config().auto_initialize_new_repos is True
+    assert json.loads(config_path.read_text()) == {"auto_initialize_new_repos": True}
+
+
+def test_set_global_config_setting_updates_auto_init(monkeypatch, tmp_path):
+    monkeypatch.setattr("engram.workspace.GLOBAL_CONFIG_PATH", tmp_path / "config.json")
+
+    config = set_global_config_setting("auto_initialize_new_repos", "true")
+
+    assert config.auto_initialize_new_repos is True

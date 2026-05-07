@@ -219,6 +219,11 @@ ENGRAM_SERVER_URL=https://www.engram-memory.com
 ENGRAM_INVITE_KEY=ek_live_...
 ```
 
+If `.engram.env` is missing, run `engram bootstrap --auto` from the
+workspace root. This is safe to run repeatedly: it only bootstraps the repo
+when the user has opted into global auto-initialization with
+`engram install --auto-init`.
+
 **If you have Engram MCP tools** (`engram_status` is available):
 1. Call `engram_status()` and follow the `next_prompt` field.
 2. Call `engram_query("<topic>")` before starting any substantive task.
@@ -247,6 +252,24 @@ Do NOT call `engram_commit` for raw user messages — the IDE hooks handle that.
 - Never commit secrets, API keys, or passwords.
 - Check for conflicts before architectural decisions.
 - Max 5 commits per task. Batch related discoveries into one commit.
+"""
+
+_PROJECT_AGENTS_MARKER = "<!-- engram:shared-memory -->"
+_PROJECT_AGENTS_BLOCK = f"""\
+{_PROJECT_AGENTS_MARKER}
+# Engram Shared Memory
+
+This project uses Engram for shared AI-agent memory.
+
+At the start of a session:
+1. Check for `.engram.env` in the workspace root.
+2. If Engram MCP tools are available, call `engram_status()` and follow its `next_prompt`.
+3. Call `engram_query("<topic>")` before starting substantive work.
+
+When you learn verified facts during a task, use `engram_commit` to record
+discoveries, decisions, corrections, constraints, and failed approaches.
+
+Do not commit raw user messages, secrets, API keys, passwords, or speculation.
 """
 
 # Kiro-specific version with `inclusion: always` frontmatter so Kiro loads it
@@ -466,7 +489,7 @@ def _write_claude_code_hook(dry_run: bool) -> bool:
     return True
 
 
-def _write_project_claude_mcp_config(dry_run: bool) -> bool:
+def _write_project_claude_mcp_config(dry_run: bool, project_dir: Path | None = None) -> bool:
     """Write project-level .claude/settings.local.json with the invite key from .engram.env.
 
     This ensures the project's workspace key overrides any global key when Claude
@@ -475,7 +498,8 @@ def _write_project_claude_mcp_config(dry_run: bool) -> bool:
 
     Returns True if written (or would be in dry-run mode).
     """
-    env_file = Path.cwd() / ".engram.env"
+    project_dir = project_dir or Path.cwd()
+    env_file = project_dir / ".engram.env"
     if not env_file.exists():
         return False
 
@@ -492,7 +516,7 @@ def _write_project_claude_mcp_config(dry_run: bool) -> bool:
     if not invite_key:
         return False
 
-    local_settings_path = Path.cwd() / ".claude" / "settings.local.json"
+    local_settings_path = project_dir / ".claude" / "settings.local.json"
 
     if dry_run:
         click.echo(f"[dry-run] Would write project MCP override to {local_settings_path}")
@@ -507,10 +531,15 @@ def _write_project_claude_mcp_config(dry_run: bool) -> bool:
     else:
         settings = {}
 
-    settings.setdefault("mcpServers", {})["engram"] = {
+    desired_entry = {
         "url": server_url,
         "headers": {"Authorization": f"Bearer {invite_key}"},
     }
+    servers = settings.setdefault("mcpServers", {})
+    if servers.get("engram") == desired_entry:
+        return False
+
+    servers["engram"] = desired_entry
     local_settings_path.write_text(json.dumps(settings, indent=2))
     return True
 
@@ -683,7 +712,10 @@ def _write_kiro_hook(project_dir: Path, dry_run: bool) -> bool:
 
     try:
         hooks_dir.mkdir(parents=True, exist_ok=True)
-        hook_path.write_text(json.dumps(_KIRO_HOOK, indent=2) + "\n")
+        hook_content = json.dumps(_KIRO_HOOK, indent=2) + "\n"
+        if hook_path.exists() and hook_path.read_text() == hook_content:
+            return False
+        hook_path.write_text(hook_content)
         return True
     except Exception:
         return False
@@ -782,8 +814,167 @@ def _find_git_dir(start: Path | None = None) -> Path | None:
     return None
 
 
-def _write_git_pre_commit_hook(dry_run: bool) -> bool:
-    git_dir = _find_git_dir(Path.cwd())
+def _find_git_root(start: Path | None = None) -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    for candidate in (current, *current.parents):
+        if _resolve_git_dir(candidate / ".git") is not None:
+            return candidate
+    return None
+
+
+def _server_url_from_mcp_url(url: str) -> str:
+    url = url.strip().rstrip("/")
+    if url.endswith("/mcp"):
+        return url[: -len("/mcp")]
+    return url
+
+
+def _load_global_workspace_credentials() -> tuple[str, str]:
+    server_url = os.environ.get("ENGRAM_SERVER_URL", "").strip()
+    mcp_url = os.environ.get("ENGRAM_MCP_URL", "").strip()
+    invite_key = os.environ.get("ENGRAM_INVITE_KEY", "").strip()
+
+    credentials_path = Path.home() / ".engram" / "credentials"
+    if credentials_path.exists():
+        for raw_line in credentials_path.read_text().splitlines():
+            line = raw_line.strip()
+            if line.startswith("ENGRAM_SERVER_URL="):
+                server_url = line[len("ENGRAM_SERVER_URL=") :].strip()
+            elif line.startswith("ENGRAM_MCP_URL="):
+                mcp_url = line[len("ENGRAM_MCP_URL=") :].strip()
+            elif line.startswith("ENGRAM_INVITE_KEY="):
+                invite_key = line[len("ENGRAM_INVITE_KEY=") :].strip()
+
+    if not server_url:
+        server_url = (
+            _server_url_from_mcp_url(mcp_url) if mcp_url else "https://www.engram-memory.com"
+        )
+
+    return server_url.rstrip("/"), invite_key
+
+
+def _write_project_engram_env(
+    project_dir: Path,
+    server_url: str,
+    invite_key: str,
+    dry_run: bool,
+) -> bool:
+    env_path = project_dir / ".engram.env"
+    if env_path.exists():
+        return False
+
+    content = (
+        "# Engram - Shared Team Memory\n"
+        "# This file lets AI agents in this workspace connect to Engram automatically.\n"
+        "# Keep it private and keep .engram.env listed in .gitignore.\n"
+        f"ENGRAM_SERVER_URL={server_url.rstrip('/')}\n"
+        f"ENGRAM_INVITE_KEY={invite_key}\n"
+    )
+
+    if not dry_run:
+        env_path.write_text(content)
+        env_path.chmod(0o600)
+    return True
+
+
+def _write_gitignore_entries(project_dir: Path, entries: list[str], dry_run: bool) -> list[str]:
+    gitignore_path = project_dir / ".gitignore"
+    existing = gitignore_path.read_text() if gitignore_path.exists() else ""
+    existing_entries = {line.strip() for line in existing.splitlines()}
+    missing = [entry for entry in entries if entry not in existing_entries]
+    if not missing:
+        return []
+
+    if not dry_run:
+        prefix = ""
+        if existing and not existing.endswith("\n"):
+            prefix = "\n"
+        block = prefix + "\n# Engram local credentials\n" + "\n".join(missing) + "\n"
+        gitignore_path.write_text(existing + block)
+    return missing
+
+
+def _write_project_agents(project_dir: Path, dry_run: bool) -> bool:
+    agents_path = project_dir / "AGENTS.md"
+    if agents_path.exists():
+        existing = agents_path.read_text()
+        if _PROJECT_AGENTS_MARKER in existing or (
+            "engram_status" in existing and "engram_query" in existing
+        ):
+            return False
+        content = existing.rstrip() + "\n\n---\n\n" + _PROJECT_AGENTS_BLOCK
+    else:
+        content = _PROJECT_AGENTS_BLOCK
+
+    if not dry_run:
+        agents_path.write_text(content)
+    return True
+
+
+def _bootstrap_current_project(auto_mode: bool, dry_run: bool) -> dict[str, object]:
+    from engram.workspace import read_global_config
+
+    if auto_mode and not read_global_config().auto_initialize_new_repos:
+        return {
+            "status": "skipped",
+            "reason": "global auto-initialization is disabled",
+            "project_dir": str(Path.cwd()),
+            "written": [],
+        }
+
+    git_root = _find_git_root(Path.cwd())
+    if git_root is None and auto_mode:
+        return {
+            "status": "skipped",
+            "reason": "not inside a git repository",
+            "project_dir": str(Path.cwd()),
+            "written": [],
+        }
+
+    project_dir = git_root or Path.cwd()
+    server_url, invite_key = _load_global_workspace_credentials()
+    if not invite_key:
+        return {
+            "status": "skipped",
+            "reason": "no global Engram credentials found",
+            "project_dir": str(project_dir),
+            "written": [],
+        }
+
+    written: list[str] = []
+
+    if _write_project_engram_env(project_dir, server_url, invite_key, dry_run):
+        written.append(".engram.env")
+
+    missing_gitignore = _write_gitignore_entries(
+        project_dir,
+        [".engram.env", ".claude/settings.local.json"],
+        dry_run,
+    )
+    if missing_gitignore:
+        written.append(".gitignore")
+
+    if _write_project_agents(project_dir, dry_run):
+        written.append("AGENTS.md")
+
+    if _write_project_claude_mcp_config(dry_run, project_dir):
+        written.append(".claude/settings.local.json")
+
+    if _write_kiro_hook(project_dir, dry_run):
+        written.append(".kiro/hooks/engram-autocommit.json")
+
+    if _write_git_pre_commit_hook(dry_run, project_dir):
+        written.append(".git/hooks/pre-commit")
+
+    return {
+        "status": "bootstrapped" if written else "already_configured",
+        "project_dir": str(project_dir),
+        "written": written,
+    }
+
+
+def _write_git_pre_commit_hook(dry_run: bool, project_dir: Path | None = None) -> bool:
+    git_dir = _find_git_dir(project_dir or Path.cwd())
     if git_dir is None:
         return False
 
@@ -798,18 +989,67 @@ exec engram pre-commit-hook "$@"
         return True
 
     hook_path.parent.mkdir(parents=True, exist_ok=True)
+    if hook_path.exists() and hook_path.read_text() == hook_body:
+        return False
     hook_path.write_text(hook_body)
     hook_path.chmod(0o755)
     return True
 
 
 @main.command()
+@click.option(
+    "--auto",
+    "auto_mode",
+    is_flag=True,
+    help="Only bootstrap when global auto-initialization is enabled.",
+)
 @click.option("--dry-run", is_flag=True, help="Show what would be changed without writing.")
-def install(dry_run: bool) -> None:
+def bootstrap(auto_mode: bool, dry_run: bool) -> None:
+    """Initialize the current repo from global Engram credentials."""
+    result = _bootstrap_current_project(auto_mode=auto_mode, dry_run=dry_run)
+    status = result["status"]
+    project_dir = result["project_dir"]
+
+    if status == "skipped":
+        click.echo(f"Engram bootstrap skipped: {result['reason']}")
+        return
+
+    written = result.get("written", [])
+    prefix = "[dry-run] " if dry_run else ""
+    if status == "already_configured":
+        click.echo(f"{prefix}Engram already configured for {project_dir}")
+        return
+
+    click.echo(f"{prefix}Engram bootstrapped for {project_dir}")
+    if written:
+        click.echo("Updated: " + ", ".join(str(item) for item in written))
+
+
+@main.command()
+@click.option("--dry-run", is_flag=True, help="Show what would be changed without writing.")
+@click.option(
+    "--auto-init/--no-auto-init",
+    default=None,
+    help="Enable or disable automatic Engram bootstrap in new git repositories.",
+)
+def install(dry_run: bool, auto_init: bool | None) -> None:
     """Auto-detect MCP clients and add Engram to their config."""
     added = []
     skipped = []
     steering_written = []
+
+    if auto_init is not None:
+        from engram.workspace import read_global_config, write_global_config
+
+        global_config = read_global_config()
+        global_config.auto_initialize_new_repos = auto_init
+        if dry_run:
+            state = "enable" if auto_init else "disable"
+            click.echo(f"[dry-run] Would {state} global auto-initialization")
+        else:
+            write_global_config(global_config)
+            state = "enabled" if auto_init else "disabled"
+            click.echo(f"Global auto-initialization {state}")
 
     for client_name, info in _MCP_CLIENTS.items():
         config_path: Path = info["path"]
