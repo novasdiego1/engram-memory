@@ -5,6 +5,7 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from engram.cli import main, _MCP_CLIENTS, _engram_mcp_entry_for_client
+from engram.workspace import GlobalConfig, read_global_config, write_global_config
 
 
 _REAL_HOME = Path.home()
@@ -223,3 +224,78 @@ def test_install_writes_git_pre_commit_hook(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert hook_path.exists()
     assert 'engram pre-commit-hook "$@"' in hook_path.read_text()
+
+
+def test_install_auto_init_writes_global_config(tmp_path):
+    runner = CliRunner()
+
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("engram.workspace.GLOBAL_CONFIG_PATH", tmp_path / ".engram" / "config.json"),
+        patch("engram.cli._MCP_CLIENTS", {}),
+        patch("engram.cli._try_claude_code_cli", lambda *args, **kwargs: None),
+        patch("engram.cli._write_claude_code_hook", return_value=False),
+        patch("engram.cli._write_windsurf_hook", return_value=False),
+        patch("engram.cli._write_cursor_hook", return_value=False),
+        patch("engram.cli._write_kiro_hook", return_value=False),
+        patch("engram.cli._write_project_claude_mcp_config", return_value=False),
+        patch("engram.cli._write_git_pre_commit_hook", return_value=False),
+    ):
+        result = runner.invoke(main, ["install", "--auto-init"])
+
+        assert result.exit_code == 0
+        assert read_global_config().auto_initialize_new_repos is True
+        assert "Global auto-initialization enabled" in result.output
+
+
+def test_bootstrap_auto_skips_when_global_auto_init_disabled(tmp_path, monkeypatch):
+    runner = CliRunner()
+    project = tmp_path / "repo"
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.chdir(project)
+
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("engram.workspace.GLOBAL_CONFIG_PATH", tmp_path / ".engram" / "config.json"),
+    ):
+        result = runner.invoke(main, ["bootstrap", "--auto"])
+
+    assert result.exit_code == 0
+    assert "global auto-initialization is disabled" in result.output
+    assert not (project / ".engram.env").exists()
+
+
+def test_bootstrap_auto_writes_project_files_from_global_credentials(tmp_path, monkeypatch):
+    runner = CliRunner()
+    project = tmp_path / "repo"
+    (project / ".git").mkdir(parents=True)
+    monkeypatch.chdir(project)
+
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("engram.workspace.GLOBAL_CONFIG_PATH", tmp_path / ".engram" / "config.json"),
+    ):
+        write_global_config(GlobalConfig(auto_initialize_new_repos=True))
+        credentials_dir = tmp_path / ".engram"
+        credentials_dir.mkdir(exist_ok=True)
+        (credentials_dir / "credentials").write_text(
+            "ENGRAM_SERVER_URL=https://shared.example.com\nENGRAM_INVITE_KEY=ek_live_shared\n"
+        )
+
+        result = runner.invoke(main, ["bootstrap", "--auto"])
+
+    assert result.exit_code == 0
+    assert "Engram bootstrapped" in result.output
+
+    env_text = (project / ".engram.env").read_text()
+    assert "ENGRAM_SERVER_URL=https://shared.example.com" in env_text
+    assert "ENGRAM_INVITE_KEY=ek_live_shared" in env_text
+
+    gitignore = (project / ".gitignore").read_text()
+    assert ".engram.env" in gitignore
+    assert ".claude/settings.local.json" in gitignore
+
+    assert "engram_status" in (project / "AGENTS.md").read_text()
+    assert (project / ".claude" / "settings.local.json").exists()
+    assert (project / ".kiro" / "hooks" / "engram-autocommit.json").exists()
+    assert (project / ".git" / "hooks" / "pre-commit").exists()
