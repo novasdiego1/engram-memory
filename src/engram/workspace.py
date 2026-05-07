@@ -24,6 +24,7 @@ WORKSPACE_PATH = Path.home() / ".engram" / "workspace.json"
 
 
 _CREDENTIALS_PATH = Path.home() / ".engram" / "credentials"
+GLOBAL_CONFIG_PATH = Path.home() / ".engram" / "config.json"
 
 
 @dataclass
@@ -39,6 +40,57 @@ class WorkspaceConfig:
     description: str = ""
     server_url: str = ""
     invite_key: str = ""
+
+
+@dataclass
+class GlobalConfig:
+    auto_initialize_new_repos: bool = False
+
+
+GLOBAL_EDITABLE_CONFIG_KEYS = {"auto_initialize_new_repos"}
+
+
+def read_global_config() -> GlobalConfig:
+    """Return user-level Engram preferences, or defaults if none exist."""
+    if not GLOBAL_CONFIG_PATH.exists():
+        return GlobalConfig()
+
+    try:
+        data = json.loads(GLOBAL_CONFIG_PATH.read_text())
+    except Exception:
+        return GlobalConfig()
+
+    return GlobalConfig(
+        auto_initialize_new_repos=bool(data.get("auto_initialize_new_repos", False))
+    )
+
+
+def write_global_config(config: GlobalConfig) -> None:
+    """Persist user-level Engram preferences to ~/.engram/config.json."""
+    GLOBAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GLOBAL_CONFIG_PATH.write_text(json.dumps(asdict(config), indent=2))
+    GLOBAL_CONFIG_PATH.chmod(0o600)
+
+
+def parse_global_config_value(key: str, raw_value: str) -> Any:
+    """Validate and coerce a raw CLI value for a supported global config key."""
+    if key not in GLOBAL_EDITABLE_CONFIG_KEYS:
+        allowed = ", ".join(sorted(GLOBAL_EDITABLE_CONFIG_KEYS))
+        raise ValueError(f"Unknown global config key '{key}'. Allowed keys: {allowed}")
+
+    if key == "auto_initialize_new_repos":
+        return _parse_bool(raw_value)
+
+    raise ValueError(f"Unsupported global config key: {key}")
+
+
+def set_global_config_setting(key: str, raw_value: str) -> GlobalConfig:
+    """Update one user-level Engram preference and persist it."""
+    config = read_global_config()
+    value = parse_global_config_value(key, raw_value)
+    setattr(config, key, value)
+    write_global_config(config)
+    return config
 
 
 def read_workspace() -> WorkspaceConfig | None:
