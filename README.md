@@ -152,6 +152,9 @@ Type `engram` in any terminal to open the interactive shell — search memory, i
 
 ```bash
 engram                  # Open the interactive shell (conflicts, search, status, and more)
+engram install --auto-init
+                        # Opt into automatic Engram setup for new git repositories
+engram bootstrap --auto # Agent-safe no-op unless global auto-init is enabled
 ```
 
 
